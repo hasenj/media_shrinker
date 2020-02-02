@@ -9,6 +9,7 @@ import (
 	"io"
 	"bufio"
 	"strings"
+	"time"
 )
 
 type VideoFile struct {
@@ -86,6 +87,13 @@ func ParseTime(ts string) int {
 	return seconds + minutes * 60 + hours * 3600
 }
 
+func FormatTime(s float64) string {
+	seconds := int(s) % 60
+	minutes := int(s / 60) % 60
+	hours := int(s / 3600)
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+}
+
 func ShrinkMovie(movie *VideoFileStatus) error {
 	// get the video's dimensions
 	//
@@ -132,6 +140,7 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 		panic(fmt.Errorf("programmer error: incorrect usage of command piping: %w", err))
 	}
 
+	startTime := time.Now()
 	fmt.Println(cmd.String())
 	cmd.Start()
 
@@ -152,10 +161,10 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 			continue
 		}
 		ts = ts[:spaceIndex]
-		secondsPassed := ParseTime(ts)
-		progress := int((float64(secondsPassed) / duration) * 100)
-		fmt.Printf("Progress: %d%%     (%d / %d)   \r", progress, secondsPassed, int(duration))
-		// fmt.Printf("Progress: %d%%     (%v / %v)   \r", progress, ts, duration)
+		durationProcessed := ParseTime(ts) // of the video
+		progress := int((float64(durationProcessed) / duration) * 100)
+		timePassed := time.Since(startTime) // monotonic clock time
+		fmt.Printf("%s -> %d%% [%d / %d]     \r", FormatTime(timePassed.Seconds()), progress, durationProcessed, int(duration))
 
 		if err == io.EOF {
 			break
@@ -251,6 +260,6 @@ func main() {
 			largest.HadError = true
 			fmt.Println("Warning: shrinking %s failed: %s", largest.Name, err)
 		}
-		break // TEMP only do it once for now!
+		// break // TEMP only do it once for now!
 	}
 }
