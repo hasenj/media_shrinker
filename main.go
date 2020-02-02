@@ -7,6 +7,8 @@ import (
 	"path"
 	"flag"
 	"io"
+	"bufio"
+	"strings"
 )
 
 type VideoFile struct {
@@ -66,15 +68,22 @@ const GB = 1 << 30
 
 func BytesSize(size int) string {
 	if size > GB {
-		return fmt.Sprintf("%f.2 GB", float64(size) / GB)
+		return fmt.Sprintf("%.2f GB", float64(size) / GB)
 	}
 	if size > MB {
-		return fmt.Sprintf("%f.2 MB", float64(size) / MB)
+		return fmt.Sprintf("%.2f MB", float64(size) / MB)
 	}
 	if size > KB {
-		return fmt.Sprintf("%f.2 KB", float64(size) / KB)
+		return fmt.Sprintf("%.2f KB", float64(size) / KB)
 	}
-	return fmt.Sprintf("%f.2 B", float64(size))
+	return fmt.Sprintf("%.2f B", float64(size))
+}
+
+// outputs the number of seconds.
+func ParseTime(ts string) int {
+	var hours, minutes, seconds, ss int
+	fmt.Sscanf(ts, "%d:%d:%d.%d", &hours, &minutes, &seconds, &ss)
+	return seconds + minutes * 60 + hours * 3600
 }
 
 func ShrinkMovie(movie *VideoFileStatus) error {
@@ -87,7 +96,7 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 	//
 	inpath := path.Join(movie.Src, movie.Name)
 	var probeArgs = []string {
-		"-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,nb_frames",
+		"-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		inpath,
 	}
@@ -122,29 +131,42 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 	if err != nil {
 		panic(fmt.Errorf("programmer error: incorrect usage of command piping: %w", err))
 	}
-	// reader := bufio.NewReader(cmdout)
 
 	fmt.Println(cmd.String())
 	cmd.Start()
 
-	io.Copy(os.Stdout, cmdout)
+	reader := bufio.NewReader(cmdout)
+	for {
+		line, err := reader.ReadString('\r')
 
-	// buffer := make([]byte, 1 * KB)
-	// for {
-	// 	// just show the output for now
-	// 	n, err := cmdout.Read(buffer)
-	// 	if n > 0 {
-	// 		fmt.Printf(buffer[:n])
-	// 	}
-	// 	if err == io.EOF {
-	// 		break
-	// 	} else if err != nil {
-	// 		// unexpected error!! what could it be?!
-	// 		// TODO: return this error?
-	// 		fmt.Printf("I/O error while interacting with ffmpeg", err)
-	// 		break
-	// 	}
-	// }
+		timestampIndex := strings.LastIndex(line, "time=")
+		if timestampIndex == -1 {
+			fmt.Println("warning: no timestamp found!!")
+			continue // should not happen?!
+		}
+		timestampIndex += len("time=")
+		ts := line[timestampIndex:]
+		spaceIndex := strings.Index(ts, " ")
+		if spaceIndex == -1 {
+			fmt.Println("could not parse timestamp:", ts)
+			continue
+		}
+		ts = ts[:spaceIndex]
+		secondsPassed := ParseTime(ts)
+		progress := int((float64(secondsPassed) / duration) * 100)
+		fmt.Printf("Progress: %d%%     (%d / %d)   \r", progress, secondsPassed, int(duration))
+		// fmt.Printf("Progress: %d%%     (%v / %v)   \r", progress, ts, duration)
+
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			// unexpected error!! what could it be?!
+			// TODO: return this error?
+			fmt.Printf("I/O error while interacting with ffmpeg", err)
+			break
+		}
+	}
+
 	{
 		err := cmd.Wait()
 		if err != nil {
