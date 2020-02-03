@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"strings"
 	"time"
+	"math"
 )
 
 type VideoFile struct {
@@ -81,10 +82,11 @@ func BytesSize(size int) string {
 }
 
 // outputs the number of seconds.
-func ParseTime(ts string) int {
+func ParseTime(ts string) float64 {
 	var hours, minutes, seconds, ss int
 	fmt.Sscanf(ts, "%d:%d:%d.%d", &hours, &minutes, &seconds, &ss)
-	return seconds + minutes * 60 + hours * 3600
+	// NOTE: assuming ss is always just two digits
+	return (float64(ss) / 100.0) + float64(seconds + minutes * 60 + hours * 3600)
 }
 
 func FormatTime(s float64) string {
@@ -94,7 +96,13 @@ func FormatTime(s float64) string {
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
-func ShrinkMovie(movie *VideoFileStatus) error {
+type VideoSize struct {
+	Width int
+	Height int
+	Duration float64
+}
+
+func ProbeSize(inpath string) (out VideoSize, err error) {
 	// get the video's dimensions
 	//
 	//    ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -of default=noprint_wrappers=1:nokey=1 VID_20191207_115139.mp4
@@ -102,7 +110,6 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 	//    1080
 	//    75.049911
 	//
-	inpath := path.Join(movie.Src, movie.Name)
 	var probeArgs = []string {
 		"-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
@@ -111,20 +118,25 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 	probeCmd := exec.Command("ffprobe", probeArgs...)
 	output, err := probeCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("Could not get video dimensions. ffprobe command failed with: %w", err)
+		return out, fmt.Errorf("Could not get video dimensions. ffprobe command failed with: %w", err)
 	}
 
-	var width, height int
-	var duration float64
-	{
-		_, err := fmt.Sscan(string(output), &width, &height, &duration)
-		if err != nil {
-			return fmt.Errorf("Could not get video dimensions. ffprobe output parsing failed with: %w", err)
-		}
+	_, err = fmt.Sscan(string(output), &out.Width, &out.Height, &out.Duration)
+	if err != nil {
+		return out, fmt.Errorf("Could not get video dimensions. ffprobe output parsing failed with: %w", err)
+	}
+	return out, nil
+}
+
+func ShrinkMovie(movie *VideoFileStatus) error {
+	inpath := path.Join(movie.Src, movie.Name)
+	size, err := ProbeSize(inpath)
+	if err != nil {
+		return err
 	}
 
 	var desired_width = 1080
-	if width < height { // vertical video
+	if size.Width < size.Height { // vertical video
 		desired_width = 720
 	}
 
@@ -162,9 +174,9 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 		}
 		ts = ts[:spaceIndex]
 		durationProcessed := ParseTime(ts) // of the video
-		progress := int((float64(durationProcessed) / duration) * 100)
+		progress := (float64(durationProcessed) / size.Duration) * 100
 		timePassed := time.Since(startTime) // monotonic clock time
-		fmt.Printf("%s -> %d%% [%d / %d]     \r", FormatTime(timePassed.Seconds()), progress, durationProcessed, int(duration))
+		fmt.Printf("%s -> %.2f%% [%.2f / %.2f]     \r", FormatTime(timePassed.Seconds()), progress, durationProcessed, size.Duration)
 
 		if err == io.EOF {
 			break
@@ -197,8 +209,8 @@ func main() {
 	var src, dst string
 	flag.StringVar(&src, "src", ".", "The directory with the source video files")
 	flag.StringVar(&dst, "dst", "./smaller", "The directory where compressed videos are to be placed")
-
 	flag.Parse()
+	cmd := flag.Arg(0)
 
 	srcMovies := ListVideos(src)
 	dstMovies := ListVideos(dst)
@@ -223,43 +235,69 @@ func main() {
 		movies = append(movies, movie)
 	}
 
-
-	for _, movie := range movies {
-		fmt.Printf("File: %s %s", movie.Name, BytesSize(movie.Size))
-		if movie.IsShrunk {
-			fmt.Printf(" -> %s", BytesSize(movie.ShrunkSize))
-		}
-		fmt.Println()
-	}
-
-	// pick the biggest file progressively and process it
-	for {
-		fmt.Println("looking for largest unprocessed file")
-		// TODO: allow the user to send a signal that this is the last file to process!
-		var largest *VideoFileStatus
-		for index := range movies {
-			movie := &movies[index]
-			if movie.IsShrunk {
+	switch cmd {
+	case "verify":
+		// verify each shrunk file that the durations match!
+		for _, movie := range movies {
+			if !movie.IsShrunk {
 				continue
 			}
-			if largest == nil {
-				largest = movie
+			inpath := path.Join(movie.Src, movie.Name)
+			outpath := path.Join(movie.Dst, movie.Name)
+			inSize, err := ProbeSize(inpath)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			outSize, err := ProbeSize(outpath)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			fmt.Printf("%s: %8.2f  -> %8.2f ", movie.Name, inSize.Duration, outSize.Duration)
+			if math.Abs(inSize.Duration - outSize.Duration) > 0.1 {
+				fmt.Println("[MISMATCH]")
 			} else {
-				if movie.Size > largest.Size {
-					largest = movie
-				}
+				fmt.Println("[OK]")
 			}
 		}
-		if largest == nil {
-			fmt.Println("It appears we have processed all the files!")
-			break
+	case "convert":
+		// print current situation without verifying size
+		for _, movie := range movies {
+			fmt.Printf("File: %s %s", movie.Name, BytesSize(movie.Size))
+			if movie.IsShrunk {
+				fmt.Printf(" -> %s", BytesSize(movie.ShrunkSize))
+			}
+			fmt.Println()
 		}
-		fmt.Println("Processing file:", largest.Name)
-		err := ShrinkMovie(largest)
-		if err != nil {
-			largest.HadError = true
-			fmt.Println("Warning: shrinking %s failed: %s", largest.Name, err)
+		// pick the biggest file progressively and process it
+		for {
+			fmt.Println("looking for largest unprocessed file")
+			// TODO: allow the user to send a signal that this is the last file to process!
+			var largest *VideoFileStatus
+			for index := range movies {
+				movie := &movies[index]
+				if movie.IsShrunk {
+					continue
+				}
+				if largest == nil {
+					largest = movie
+				} else {
+					if movie.Size > largest.Size {
+						largest = movie
+					}
+				}
+			}
+			if largest == nil {
+				fmt.Println("It appears we have processed all the files!")
+				break
+			}
+			fmt.Println("Processing file:", largest.Name)
+			err := ShrinkMovie(largest)
+			if err != nil {
+				largest.HadError = true
+				fmt.Println("Warning: shrinking %s failed: %s", largest.Name, err)
+			}
 		}
-		// break // TEMP only do it once for now!
 	}
 }
