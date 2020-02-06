@@ -21,7 +21,6 @@ type VideoFile struct {
 type VideoFileStatus struct {
 	Name string
 	Size int
-	Src, Dst string
 
 	IsShrunk bool
 	ShrunkSize int
@@ -32,13 +31,13 @@ type VideoFileStatus struct {
 func ListVideos(dir string) []VideoFile {
 	f, err := os.Open(dir)
 	if err != nil {
-		fmt.Println("Error reading directory:", err)
+		fmt.Println("Error reading directory", dir, err)
 		os.Exit(1)
 		return nil
 	}
 	entries, err := f.Readdir(-1)
 	if err != nil {
-		fmt.Println("Error listing directory:", err)
+		fmt.Println("Error listing directory", dir, err)
 		os.Exit(1)
 		return nil
 	}
@@ -102,6 +101,10 @@ type VideoSize struct {
 	Duration float64
 }
 
+func DurationsEqual(dur1, dur2 float64) bool {
+	return math.Abs(dur1 - dur2) < 0.1
+}
+
 func ProbeSize(inpath string) (out VideoSize, err error) {
 	// get the video's dimensions
 	//
@@ -128,8 +131,8 @@ func ProbeSize(inpath string) (out VideoSize, err error) {
 	return out, nil
 }
 
-func ShrinkMovie(movie *VideoFileStatus) error {
-	inpath := path.Join(movie.Src, movie.Name)
+func (app *Converter) ShrinkMovie(movie *VideoFileStatus) error {
+	inpath := path.Join(app.SrcDir, movie.Name)
 	size, err := ProbeSize(inpath)
 	if err != nil {
 		return err
@@ -141,9 +144,10 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 	}
 
 	// ffmpeg -i SRC/NAME -vf scale="DESIRED_WIDTH:-1" DST/NAME
-	outpath := path.Join(movie.Dst, movie.Name)
+	outpath := path.Join(app.DstDir, movie.Name)
+	temppath := path.Join(app.TmpDir, movie.Name)
 	var args = []string {
-		"-y", "-i", inpath, "-vf", fmt.Sprintf(`scale=%d:-1`, desired_width), outpath,
+		"-y", "-i", inpath, "-vf", fmt.Sprintf(`scale=%d:-1`, desired_width), temppath,
 	}
 	cmd := exec.Command("ffmpeg", args...)
 
@@ -195,6 +199,20 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 		}
 	}
 
+	// check the duration of the written file to temppath matches our duration, and if so, move it to outpath
+	outSize, err := ProbeSize(temppath)
+	if err != nil {
+		os.Remove(temppath)
+		return fmt.Errorf("Conversion appears to be failed because ffprobe failed: %w", err)
+	}
+
+	if DurationsEqual(size.Duration, outSize.Duration) {
+		os.Rename(temppath, outpath)
+		fmt.Println("Wrote shrunk file to", outpath)
+	} else {
+		return fmt.Errorf("Conversion failed; duration mismatch: %8.2f -> %8.2f", size.Duration, outSize.Duration)
+	}
+
 	// chekc the file was written properly or not
 	outFileInfo, err := os.Stat(outpath)
 	if err != nil {
@@ -202,26 +220,46 @@ func ShrinkMovie(movie *VideoFileStatus) error {
 	}
 	movie.IsShrunk = true
 	movie.ShrunkSize = int(outFileInfo.Size())
+	if app.DoClean {
+		fmt.Println("Removing input file")
+		fmt.Println("rm", inpath)
+		os.Remove(inpath)
+	}
 	return nil
 }
 
-func main() {
-	var src, dst string
-	flag.StringVar(&src, "src", ".", "The directory with the source video files")
-	flag.StringVar(&dst, "dst", "./smaller", "The directory where compressed videos are to be placed")
-	flag.Parse()
-	cmd := flag.Arg(0)
+type Converter struct {
+	SrcDir, DstDir, TmpDir string
+	DoClean bool
+	Command string
+}
 
-	srcMovies := ListVideos(src)
-	dstMovies := ListVideos(dst)
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Must take at least a command: verify or convert")
+		os.Exit(1)
+	}
+	cmd := os.Args[1]
+	var app Converter
+	var args []string
+	if len(os.Args) > 2 {
+		args = os.Args[2:]
+	}
+	f := flag.NewFlagSet(cmd, flag.ExitOnError)
+	f.StringVar(&app.SrcDir, "src", ".", "The directory with the source video files")
+	f.StringVar(&app.DstDir, "dst", "./smaller", "The directory where compressed videos are to be placed")
+	f.StringVar(&app.TmpDir, "tmp", "./_temp_", "The directory where compressed videos are to be placed")
+	f.BoolVar(&app.DoClean, "clean", false, "For 'verify' mode, whether to clean verified converted files or not")
+	f.Parse(args)
+
+	srcMovies := ListVideos(app.SrcDir)
+	dstMovies := ListVideos(app.DstDir)
 
 	movies := make([]VideoFileStatus, 0)
 	for _, srcEntry := range srcMovies {
 		var movie VideoFileStatus
 		movie.Name = srcEntry.Name
 		movie.Size = srcEntry.Size
-		movie.Src = src
-		movie.Dst = dst
 
 		// find a shrunk version of the movie
 		for _, dstEntry := range dstMovies {
@@ -242,8 +280,8 @@ func main() {
 			if !movie.IsShrunk {
 				continue
 			}
-			inpath := path.Join(movie.Src, movie.Name)
-			outpath := path.Join(movie.Dst, movie.Name)
+			inpath := path.Join(app.SrcDir, movie.Name)
+			outpath := path.Join(app.DstDir, movie.Name)
 			inSize, err := ProbeSize(inpath)
 			if err != nil {
 				fmt.Println(err)
@@ -255,21 +293,26 @@ func main() {
 				continue
 			}
 			fmt.Printf("%s: %8.2f  -> %8.2f ", movie.Name, inSize.Duration, outSize.Duration)
-			if math.Abs(inSize.Duration - outSize.Duration) > 0.1 {
-				fmt.Println("[MISMATCH]")
+			if DurationsEqual(inSize.Duration, outSize.Duration) {
+				fmt.Println("        [OK]")
+				if app.DoClean {
+					fmt.Println("rm", inpath)
+					os.Remove(inpath)
+				}
 			} else {
-				fmt.Println("[OK]")
+				fmt.Println("  [MISMATCH]")
 			}
 		}
 	case "convert":
 		// print current situation without verifying size
 		for _, movie := range movies {
-			fmt.Printf("File: %s %s", movie.Name, BytesSize(movie.Size))
+			fmt.Printf("File: %s [%s]", movie.Name, BytesSize(movie.Size))
 			if movie.IsShrunk {
-				fmt.Printf(" -> %s", BytesSize(movie.ShrunkSize))
+				fmt.Printf(" -> [%s]", BytesSize(movie.ShrunkSize))
 			}
 			fmt.Println()
 		}
+
 		// pick the biggest file progressively and process it
 		for {
 			fmt.Println("looking for largest unprocessed file")
@@ -292,12 +335,15 @@ func main() {
 				fmt.Println("It appears we have processed all the files!")
 				break
 			}
-			fmt.Println("Processing file:", largest.Name)
-			err := ShrinkMovie(largest)
+			fmt.Printf("Shrinking %s [%s]\n", largest.Name, BytesSize(largest.Size))
+			err := app.ShrinkMovie(largest)
 			if err != nil {
 				largest.HadError = true
 				fmt.Println("Warning: shrinking %s failed: %s", largest.Name, err)
+			} else {
+				fmt.Printf("Shrunk %s [%s] -> [%s]\n", largest.Name, BytesSize(largest.Size), BytesSize(largest.ShrunkSize))
 			}
+
 		}
 	}
 }
