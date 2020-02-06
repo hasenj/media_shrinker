@@ -1,34 +1,47 @@
 package main
 
 import (
+	"bufio"
+	"flag"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path"
-	"flag"
-	"io"
-	"bufio"
 	"strings"
 	"time"
-	"math"
 )
 
-type VideoFile struct {
+type MediaFile struct {
 	Dir, Name string
-	Size int // in bytes
+	Size      int // in bytes
 }
 
-type VideoFileStatus struct {
+type MediaFileStatus struct {
 	Name string
 	Size int
 
-	IsShrunk bool
+	IsShrunk   bool
 	ShrunkSize int
 
 	HadError bool // flag to avoid trying to process again
 }
 
-func ListVideos(dir string) []VideoFile {
+func oneOf(ext string, exts ...string) bool {
+	for index := range exts {
+		if ext == exts[index] {
+			return true
+		}
+	}
+	return false
+}
+
+func ListVideos(dir string) []MediaFile {
+	return ListMedia(dir, MB, ".mp4")
+}
+
+func ListMedia(dir string, minSize int, exts ...string) []MediaFile {
 	f, err := os.Open(dir)
 	if err != nil {
 		fmt.Println("Error reading directory", dir, err)
@@ -41,19 +54,19 @@ func ListVideos(dir string) []VideoFile {
 		os.Exit(1)
 		return nil
 	}
-	files := make([]VideoFile, 0)
+	files := make([]MediaFile, 0)
 	for _, fentry := range entries {
 		name := fentry.Name()
 		ext := path.Ext(name)
-		if ext != ".mp4" { // TODO: support more extensions!
+		if !oneOf(ext, exts) {
 			continue
 		}
 		size := int(fentry.Size())
 		if size < MB {
 			continue
 		}
-		vfile := VideoFile {
-			Dir: dir,
+		vfile := MediaFile{
+			Dir:  dir,
 			Name: name,
 			Size: int(fentry.Size()),
 		}
@@ -62,20 +75,19 @@ func ListVideos(dir string) []VideoFile {
 	return files
 }
 
-
 const KB = 1 << 10
 const MB = 1 << 20
 const GB = 1 << 30
 
 func BytesSize(size int) string {
 	if size > GB {
-		return fmt.Sprintf("%.2f GB", float64(size) / GB)
+		return fmt.Sprintf("%.2f GB", float64(size)/GB)
 	}
 	if size > MB {
-		return fmt.Sprintf("%.2f MB", float64(size) / MB)
+		return fmt.Sprintf("%.2f MB", float64(size)/MB)
 	}
 	if size > KB {
-		return fmt.Sprintf("%.2f KB", float64(size) / KB)
+		return fmt.Sprintf("%.2f KB", float64(size)/KB)
 	}
 	return fmt.Sprintf("%.2f B", float64(size))
 }
@@ -85,24 +97,24 @@ func ParseTime(ts string) float64 {
 	var hours, minutes, seconds, ss int
 	fmt.Sscanf(ts, "%d:%d:%d.%d", &hours, &minutes, &seconds, &ss)
 	// NOTE: assuming ss is always just two digits
-	return (float64(ss) / 100.0) + float64(seconds + minutes * 60 + hours * 3600)
+	return (float64(ss) / 100.0) + float64(seconds+minutes*60+hours*3600)
 }
 
 func FormatTime(s float64) string {
 	seconds := int(s) % 60
-	minutes := int(s / 60) % 60
+	minutes := int(s/60) % 60
 	hours := int(s / 3600)
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
 type VideoSize struct {
-	Width int
-	Height int
+	Width    int
+	Height   int
 	Duration float64
 }
 
 func DurationsEqual(dur1, dur2 float64) bool {
-	return math.Abs(dur1 - dur2) < 0.1
+	return math.Abs(dur1-dur2) < 0.1
 }
 
 func ProbeSize(inpath string) (out VideoSize, err error) {
@@ -113,7 +125,7 @@ func ProbeSize(inpath string) (out VideoSize, err error) {
 	//    1080
 	//    75.049911
 	//
-	var probeArgs = []string {
+	var probeArgs = []string{
 		"-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		inpath,
@@ -131,7 +143,7 @@ func ProbeSize(inpath string) (out VideoSize, err error) {
 	return out, nil
 }
 
-func (app *Converter) ShrinkMovie(movie *VideoFileStatus) error {
+func (app *Converter) ShrinkMovie(movie *MediaFileStatus) error {
 	inpath := path.Join(app.SrcDir, movie.Name)
 	size, err := ProbeSize(inpath)
 	if err != nil {
@@ -146,7 +158,7 @@ func (app *Converter) ShrinkMovie(movie *VideoFileStatus) error {
 	// ffmpeg -i SRC/NAME -vf scale="DESIRED_WIDTH:-1" DST/NAME
 	outpath := path.Join(app.DstDir, movie.Name)
 	temppath := path.Join(app.TmpDir, movie.Name)
-	var args = []string {
+	var args = []string{
 		"-y", "-i", inpath, "-vf", fmt.Sprintf(`scale=%d:-1`, desired_width), temppath,
 	}
 	cmd := exec.Command("ffmpeg", args...)
@@ -207,7 +219,10 @@ func (app *Converter) ShrinkMovie(movie *VideoFileStatus) error {
 	}
 
 	if DurationsEqual(size.Duration, outSize.Duration) {
-		os.Rename(temppath, outpath)
+		err := os.Rename(temppath, outpath)
+		if err != nil {
+			return fmt.Errorf("Conversion failed; final rename step failed: %w", err);
+		}
 		fmt.Println("Wrote shrunk file to", outpath)
 	} else {
 		return fmt.Errorf("Conversion failed; duration mismatch: %8.2f -> %8.2f", size.Duration, outSize.Duration)
@@ -230,8 +245,8 @@ func (app *Converter) ShrinkMovie(movie *VideoFileStatus) error {
 
 type Converter struct {
 	SrcDir, DstDir, TmpDir string
-	DoClean bool
-	Command string
+	DoClean                bool
+	Command                string
 }
 
 func main() {
@@ -255,9 +270,9 @@ func main() {
 	srcMovies := ListVideos(app.SrcDir)
 	dstMovies := ListVideos(app.DstDir)
 
-	movies := make([]VideoFileStatus, 0)
+	movies := make([]MediaFileStatus, 0)
 	for _, srcEntry := range srcMovies {
-		var movie VideoFileStatus
+		var movie MediaFileStatus
 		movie.Name = srcEntry.Name
 		movie.Size = srcEntry.Size
 
@@ -317,7 +332,7 @@ func main() {
 		for {
 			fmt.Println("looking for largest unprocessed file")
 			// TODO: allow the user to send a signal that this is the last file to process!
-			var largest *VideoFileStatus
+			var largest *MediaFileStatus
 			for index := range movies {
 				movie := &movies[index]
 				if movie.IsShrunk {
@@ -343,7 +358,6 @@ func main() {
 			} else {
 				fmt.Printf("Shrunk %s [%s] -> [%s]\n", largest.Name, BytesSize(largest.Size), BytesSize(largest.ShrunkSize))
 			}
-
 		}
 	}
 }
