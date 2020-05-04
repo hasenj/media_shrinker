@@ -58,7 +58,7 @@ func ListMedia(dir string, minSize int, exts ...string) []MediaFile {
 	for _, fentry := range entries {
 		name := fentry.Name()
 		ext := path.Ext(name)
-		if !oneOf(ext, exts) {
+		if !oneOf(ext, exts...) {
 			continue
 		}
 		size := int(fentry.Size())
@@ -154,6 +154,9 @@ func (app *Converter) ShrinkMovie(movie *MediaFileStatus) error {
 	if size.Width < size.Height { // vertical video
 		desired_width = 720
 	}
+
+	os.MkdirAll(app.DstDir, 0o755)
+	os.MkdirAll(app.TmpDir, 0o755)
 
 	// ffmpeg -i SRC/NAME -vf scale="DESIRED_WIDTH:-1" DST/NAME
 	outpath := path.Join(app.DstDir, movie.Name)
