@@ -120,13 +120,13 @@ func DurationsEqual(dur1, dur2 float64) bool {
 func ProbeSize(inpath string) (out VideoSize, err error) {
 	// get the video's dimensions
 	//
-	//    ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -of default=noprint_wrappers=1:nokey=1 VID_20191207_115139.mp4
+	//    ffprobe -v fatal -select_streams v:0 -show_entries stream=width,height,duration -of default=noprint_wrappers=1:nokey=1 VID_20191207_115139.mp4
 	//    1920
 	//    1080
 	//    75.049911
 	//
 	var probeArgs = []string{
-		"-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration",
+		"-v", "fatal", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		inpath,
 	}
