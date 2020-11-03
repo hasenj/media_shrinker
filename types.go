@@ -32,9 +32,20 @@ type MediaFile struct {
 	Stage      ProcessingStage
 	ShrunkSize int
 	Error      error // if processing failed, or if processing worked but some other error occurred
+
+	Deleted bool
 }
 
 type ProcessingRequest struct {
 	InputPath  string
 	OutputPath string
+}
+
+type ShrunkStats struct {
+	Count int
+	SizeBefore int
+	SizeAfter int
+
+	DeletedCount int
+	DeletedSize int
 }

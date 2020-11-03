@@ -135,6 +135,35 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile) {
 	mediaFile.ShrunkSize = int(outFileInfo.Size())
 }
 
+func (stats *ShrunkStats) accumelate(mediaFile *MediaFile) {
+	if mediaFile.ShrunkSize > 0 && mediaFile.Error == nil {
+		stats.Count += 1
+		stats.SizeBefore += mediaFile.Size
+		stats.SizeAfter += mediaFile.ShrunkSize
+		if mediaFile.Deleted {
+			stats.DeletedCount += 1
+			stats.DeletedSize += mediaFile.Size
+		}
+	}
+}
+
+func (stats *ShrunkStats) ShrunkString() string {
+	percentage := float64(stats.SizeAfter)/float64(stats.SizeBefore) * 100
+	return fmt.Sprintf("Shrunk %d files [%s] -> [%s] (%.2f%%)", stats.Count, BytesSize(stats.SizeBefore), BytesSize(stats.SizeAfter), percentage)
+}
+
+func (stats *ShrunkStats) CleanedString() string {
+	return fmt.Sprintf("Deleted %d files [%s]", stats.DeletedCount, BytesSize(stats.DeletedSize))
+}
+
+
+func AccumelateStats(files []MediaFile) (stats ShrunkStats) {
+	for index := range files {
+		stats.accumelate(&files[index])
+	}
+	return
+}
+
 func DoProcess(app *Processor) {
 	srcFiles, err := ListMediaFiles(app.SrcDir)
 	if err != nil {
@@ -168,13 +197,15 @@ func DoProcess(app *Processor) {
 	}
 
 	// print current situation
-	for _, mediaFile := range srcFiles {
-		fmt.Printf("File: %s [%s]", mediaFile.Name, BytesSize(mediaFile.Size))
-		if mediaFile.ShrunkSize > 0 {
-			fmt.Printf(" -> [%s]", BytesSize(mediaFile.ShrunkSize))
-		}
-		fmt.Println()
+	for index := range srcFiles {
+		mediaFile := &srcFiles[index]
+		fmt.Println(fileStats("File", mediaFile))
 	}
+	stats0 := AccumelateStats(srcFiles)
+	if stats0.Count > 0 {
+		fmt.Println(stats0.ShrunkString())
+	}
+
 
 	// Process smaller files first
 	// FIXME allow the user to choose sorting method
@@ -193,19 +224,39 @@ func DoProcess(app *Processor) {
 		log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
 		ProcessMediaFile(app, mediaFile)
 		if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
-			log.Printf("Shrunk %s [%s] -> [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size), BytesSize(mediaFile.ShrunkSize))
+			fmt.Println(fileStats("Shrunk", mediaFile))
 			if app.DoClean {
 				removeMediaFile(mediaFile)
 			}
 		}
 	}
+
+	stats1 := AccumelateStats(srcFiles)
+	if stats1.Count > stats0.Count {
+		fmt.Println(stats1.ShrunkString())
+	}
+	if stats1.DeletedCount > 0 {
+		fmt.Println(stats1.CleanedString())
+	}
+
 	fmt.Println("Done")
 }
 
 func removeMediaFile(mediaFile *MediaFile) error {
 	inputPath := path.Join(mediaFile.Dir, mediaFile.Name)
-	log.Println("Removing input file")
-	log.Println("    $ rm", inputPath)
-	return os.Remove(inputPath)
+	err := os.Remove(inputPath)
+	if err == nil {
+		log.Println("Deleted file", mediaFile.Name)
+		mediaFile.Deleted = true
+	}
+	return err
+}
 
+func fileStats(prefix string, mediaFile *MediaFile) string {
+	if mediaFile.ShrunkSize == 0 {
+		return fmt.Sprintf("%s %s [%s]", prefix, mediaFile.Name, BytesSize(mediaFile.Size))
+	} else {
+		percentage := float64(mediaFile.ShrunkSize)/float64(mediaFile.Size) * 100
+		return fmt.Sprintf("%s %s [%s] -> [%s] (%.2f%%)", prefix, mediaFile.Name, BytesSize(mediaFile.Size), BytesSize(mediaFile.ShrunkSize), percentage)
+	}
 }
