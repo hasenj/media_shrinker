@@ -2,7 +2,7 @@ package media_shrinker
 
 type Processor struct {
 	SrcDir, DstDir, TmpDir string
-	DoClean                bool
+	DoClean, ReportOnly    bool
 }
 
 type MediaType int

@@ -206,6 +206,9 @@ func DoProcess(app *Processor) {
 		fmt.Println(stats0.ShrunkString())
 	}
 
+	if app.ReportOnly {
+		return
+	}
 
 	// Process smaller files first
 	// FIXME allow the user to choose sorting method
