@@ -196,6 +196,14 @@ func DoProcess(app *Processor) {
 		}
 	}
 
+
+
+	// Sort by name
+	// FIXME allow the user to choose sorting method
+	sort.Slice(srcFiles, func (i, j int) bool {
+		return srcFiles[i].Name < srcFiles[j].Name
+	});
+
 	// print current situation
 	for index := range srcFiles {
 		mediaFile := &srcFiles[index]
@@ -209,12 +217,6 @@ func DoProcess(app *Processor) {
 	if app.ReportOnly {
 		return
 	}
-
-	// Process smaller files first
-	// FIXME allow the user to choose sorting method
-	sort.Slice(srcFiles, func (i, j int) bool {
-		return srcFiles[i].Size < srcFiles[j].Size
-	});
 
 	for index := range srcFiles {
 		mediaFile := &srcFiles[index]
