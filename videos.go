@@ -30,11 +30,14 @@ func FormatTime(s float64) string {
 type VideoSize struct {
 	Width    int
 	Height   int
+
+	// in seconds
 	Duration float64
 }
 
-func DurationsEqual(dur1, dur2 float64) bool {
-	return math.Abs(dur1-dur2) < 0.1
+// DurationsRoughlyEqual allows a difference of about one second
+func DurationsRoughlyEqual(dur1, dur2 float64) bool {
+	return math.Abs(dur1-dur2) < 1
 }
 
 func ProbeVideoSize(inpath string) (out VideoSize, err error) {
@@ -149,7 +152,7 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 			return fmt.Errorf("Conversion appears to be failed because ffprobe failed: %w", err)
 		}
 
-		if !DurationsEqual(size.Duration, outSize.Duration) {
+		if !DurationsRoughlyEqual(size.Duration, outSize.Duration) {
 			return fmt.Errorf("Conversion failed; duration mismatch: %8.2f -> %8.2f", size.Duration, outSize.Duration)
 		}
 	}

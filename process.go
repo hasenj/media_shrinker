@@ -84,6 +84,13 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile) {
 
 	inputPath := path.Join(mediaFile.Dir, mediaFile.Name)
 
+	inputFileInfo, err := os.Stat(inputPath)
+	if err != nil {
+		mediaFile.Error = fmt.Errorf("Can't find input file: %w", err)
+		log.Println(mediaFile.Error)
+		return
+	}
+
 	outputPath := path.Join(app.DstDir, mediaFile.Name)
 	tempPath := path.Join(app.TmpDir, mediaFile.Name)
 
@@ -115,10 +122,26 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile) {
 		return
 	}
 
+	tempFileInfo, err := os.Stat(tempPath)
+	if err != nil {
+		mediaFile.Error = fmt.Errorf("Can't find output file: %w", err)
+		log.Println(mediaFile.Error)
+		return
+	}
+
 	mediaFile.Stage = ProcessingSuccess
 	mediaFile.Error = nil
-	err := os.Rename(tempPath, outputPath)
-	if err != nil {
+
+	var renameError error
+
+	if int(tempFileInfo.Size()) > int(inputFileInfo.Size()) {
+		log.Printf("Converted file (%s) is bigger than input file (%s)! using input file", BytesSize(int(tempFileInfo.Size())), BytesSize(int(inputFileInfo.Size())))
+		renameError = copyFile(inputPath, outputPath)
+	} else {
+		renameError = os.Rename(tempPath, outputPath)
+	}
+
+	if renameError != nil {
 		mediaFile.Error = fmt.Errorf("Conversion failed; final rename step failed: %w", err)
 		log.Println(mediaFile.Error)
 		return
@@ -131,6 +154,9 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile) {
 		log.Println(mediaFile.Error)
 		return
 	}
+
+	// Set the modified timestamp the same as the input file to preserve movie/image creation date
+	os.Chtimes(outputPath, inputFileInfo.ModTime(), inputFileInfo.ModTime())
 
 	mediaFile.ShrunkSize = int(outFileInfo.Size())
 }
