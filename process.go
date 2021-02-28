@@ -74,7 +74,7 @@ func BytesSize(size int) string {
 	return fmt.Sprintf("%.2f B", float64(size))
 }
 
-func ProcessMediaFile(app *Processor, mediaFile *MediaFile) {
+func ProcessMediaFile(app *Processor, mediaFile *MediaFile, update func()) {
 	if mediaFile.Stage != Waiting {
 		return
 	}
@@ -98,17 +98,18 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile) {
 	var result error
 
 	request := ProcessingRequest{
+		Target: mediaFile,
 		InputPath: inputPath,
 		OutputPath: tempPath,
 	}
 
 	switch mediaFile.Type {
 		case Video:
-			result = ShrinkMovie(request)
+			result = ShrinkMovie(request, update)
 		case JPG:
-			result = ShrinkJPG(request)
+			result = ShrinkJPG(request, update)
 		case PNG:
-			result = ShrinkPNG(request)
+			result = ShrinkPNG(request, update)
 		default:
 			log.Println("*** ERROR: unsupported media type:", mediaFile.Type)
 	}
@@ -190,7 +191,7 @@ func AccumelateStats(files []MediaFile) (stats ShrunkStats) {
 	return
 }
 
-func DoProcess(app *Processor) {
+func InitProcessorData(opts *ProcessorInitOptions) *ProcessorData {
 	srcFiles, err := ListMediaFiles(app.SrcDir)
 	if err != nil {
 		log.Println(err)
@@ -222,13 +223,20 @@ func DoProcess(app *Processor) {
 		}
 	}
 
-
-
 	// Sort by name
 	// FIXME allow the user to choose sorting method
 	sort.Slice(srcFiles, func (i, j int) bool {
 		return srcFiles[i].Name < srcFiles[j].Name
 	});
+
+	return &ProcessorData {
+		InitOptions: opts,
+		InputFiles: srcFiles,
+	}
+}
+
+func StartProcessing(proc *ProcessorData, update func()) {
+	// TODO: process pictures first since they are much faster to process
 
 	// print current situation
 	for index := range srcFiles {
@@ -253,7 +261,7 @@ func DoProcess(app *Processor) {
 			continue
 		}
 		log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
-		ProcessMediaFile(app, mediaFile)
+		ProcessMediaFile(app, mediaFile, update)
 		if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
 			fmt.Println(fileStats("Shrunk", mediaFile))
 			if app.DoClean {
@@ -271,6 +279,11 @@ func DoProcess(app *Processor) {
 	}
 
 	fmt.Println("Done")
+}
+
+func DoProcess(opts *ProcessorInitOptions) {
+	proc := InitProcessorData(opts)
+	StartProcessing(proc)
 }
 
 func removeMediaFile(mediaFile *MediaFile) error {

@@ -1,8 +1,13 @@
 package media_shrinker
 
-type Processor struct {
+type ProcessorInitOptions struct {
 	SrcDir, DstDir, TmpDir string
 	DoClean, ReportOnly    bool
+}
+
+type ProcessorData struct {
+	InitOptions *ProcessorOptions
+	InputFiles []MediaFile
 }
 
 type MediaType int
@@ -19,6 +24,8 @@ type ProcessingStage int
 const (
 	Waiting ProcessingStage = iota
 	ProcessingInProgress
+
+	// FIXME use one ProcessingDone stage and use other fields to indicate other flags
 	ProcessingError
 	ProcessingSuccess
 	AlreadyProcessed
@@ -33,10 +40,15 @@ type MediaFile struct {
 	ShrunkSize int
 	Error      error // if processing failed, or if processing worked but some other error occurred
 
+	// When in progress, how far along are we!
+	Percentage float32
+
 	Deleted bool
 }
 
 type ProcessingRequest struct {
+	Target *MediaFile
+
 	InputPath  string
 	OutputPath string
 }

@@ -67,7 +67,7 @@ func ProbeVideoSize(inpath string) (out VideoSize, err error) {
 }
 
 // returns nil if success
-func ShrinkMovie(request ProcessingRequest) (result error) {
+func ShrinkMovie(request ProcessingRequest, update func()) (result error) {
 	size, err := ProbeVideoSize(request.InputPath)
 	if err != nil {
 		return fmt.Errorf("Probing video size failed: %w", err)
@@ -87,6 +87,7 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 	if size.Width > desired_width {
 		args = append(args, "-vf", fmt.Sprintf(`scale=%d:-1`, desired_width))
 	}
+	args = append(args, "-c:v", "libx264", "-crf", "28")
 	args = append(args, request.OutputPath)
 	cmd := exec.Command("ffmpeg", args...)
 
@@ -118,11 +119,13 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 		}
 		ts = ts[:spaceIndex]
 		durationProcessed := ParseTime_FF(ts) // of the video
-		progress := (float64(durationProcessed) / size.Duration) * 100
+		percentage := (float64(durationProcessed) / size.Duration) * 100
 		timePassed := time.Since(startTime) // monotonic clock time
+		request.Target.Percentage = percentage
+		update()
 
 		// FIXME use a "print status line" function instead?
-		fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), progress, durationProcessed, size.Duration)
+		fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), percentage, durationProcessed, size.Duration)
 
 		if err == io.EOF {
 			break
