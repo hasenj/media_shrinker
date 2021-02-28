@@ -87,6 +87,7 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 	if size.Width > desired_width {
 		args = append(args, "-vf", fmt.Sprintf(`scale=%d:-1`, desired_width))
 	}
+	args = append(args, "-c:v", "libx264", "-crf", "26")
 	args = append(args, request.OutputPath)
 	cmd := exec.Command("ffmpeg", args...)
 
