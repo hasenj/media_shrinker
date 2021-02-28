@@ -48,4 +48,5 @@ type ShrunkStats struct {
 
 	DeletedCount int
 	DeletedSize int
+	DeletedShrunkSize int
 }

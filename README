@@ -1,7 +1,0 @@
-To install to $GOBIN
-
-    go install ./shrinker
-
-To build locally:
-
-    go build -o bin ./shrinker

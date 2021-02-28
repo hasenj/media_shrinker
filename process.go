@@ -169,6 +169,7 @@ func (stats *ShrunkStats) accumelate(mediaFile *MediaFile) {
 		if mediaFile.Deleted {
 			stats.DeletedCount += 1
 			stats.DeletedSize += mediaFile.Size
+			stats.DeletedShrunkSize += mediaFile.ShrunkSize
 		}
 	}
 }
@@ -179,7 +180,7 @@ func (stats *ShrunkStats) ShrunkString() string {
 }
 
 func (stats *ShrunkStats) CleanedString() string {
-	return fmt.Sprintf("Deleted %d files [%s]", stats.DeletedCount, BytesSize(stats.DeletedSize))
+	return fmt.Sprintf("Deleted %d files [%s]. Space opened up after shrinking: [%s]", stats.DeletedCount, BytesSize(stats.DeletedSize), BytesSize(stats.DeletedSize - stats.DeletedShrunkSize))
 }
 
 
