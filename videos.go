@@ -105,9 +105,20 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 	for {
 		line, err := reader.ReadString('\r')
 
+		if err != nil {
+			if err != io.EOF {
+				// unexpected error!! what could it be?!
+				// This is an IO error. It doesn't necessarily mean processing failed.
+				// Just break out of the I/O parsing loop and
+				// wait for the FFMPEG process to finish
+				log.Printf("I/O error while interacting with ffmpeg %w", err)
+			}
+			break
+		}
+
 		timestampIndex := strings.LastIndex(line, "time=")
 		if timestampIndex == -1 {
-			log.Println("warning: no timestamp found!!")
+			fmt.Printf("warning: no timestamp found!!\r")
 			continue // should not happen?!
 		}
 		timestampIndex += len("time=")
@@ -124,17 +135,6 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 
 		// FIXME use a "print status line" function instead?
 		fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), progress, durationProcessed, size.Duration)
-
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			// unexpected error!! what could it be?!
-			// This is an IO error. It doesn't necessarily mean processing failed.
-			// Just break out of the I/O parsing loop and
-			// wait for the FFMPEG process to finish
-			log.Printf("I/O error while interacting with ffmpeg %w", err)
-			break
-		}
 	}
 
 	// Wait for ffmpeg process to finish
