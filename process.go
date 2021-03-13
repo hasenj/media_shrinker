@@ -241,24 +241,34 @@ func DoProcess(app *Processor) {
 		fmt.Println(stats0.ShrunkString())
 	}
 
-	if app.ReportOnly {
-		return
+	// Delete files that are done!
+	// Do this before other tasks ..
+	if app.DoClean {
+		for index := range srcFiles {
+			mediaFile := &srcFiles[index]
+			if mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
+				removeMediaFile(mediaFile)
+			}
+		}
 	}
 
-	for index := range srcFiles {
-		mediaFile := &srcFiles[index]
-		if app.DoClean && mediaFile.Stage == AlreadyProcessed {
-			removeMediaFile(mediaFile)
-		}
-		if mediaFile.Stage != Waiting {
-			continue
-		}
-		log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
-		ProcessMediaFile(app, mediaFile)
-		if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
-			fmt.Println(fileStats("Shrunk", mediaFile))
-			if app.DoClean {
+	// maybe we should change the flag name?
+	if !app.ReportOnly { // if we want to actually process, start the processing loop!
+		for index := range srcFiles {
+			mediaFile := &srcFiles[index]
+			if app.DoClean && mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
 				removeMediaFile(mediaFile)
+			}
+			if mediaFile.Stage != Waiting {
+				continue
+			}
+			log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
+			ProcessMediaFile(app, mediaFile)
+			if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
+				fmt.Println(fileStats("Shrunk", mediaFile))
+				if app.DoClean {
+					removeMediaFile(mediaFile)
+				}
 			}
 		}
 	}
