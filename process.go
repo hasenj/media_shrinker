@@ -170,6 +170,7 @@ func (stats *ShrunkStats) accumelate(mediaFile *MediaFile) {
 		if mediaFile.Deleted {
 			stats.DeletedCount += 1
 			stats.DeletedSize += mediaFile.Size
+			stats.DeletedShrunkSize += mediaFile.ShrunkSize
 		}
 	}
 }
@@ -180,7 +181,7 @@ func (stats *ShrunkStats) ShrunkString() string {
 }
 
 func (stats *ShrunkStats) CleanedString() string {
-	return fmt.Sprintf("Deleted %d files [%s]", stats.DeletedCount, BytesSize(stats.DeletedSize))
+	return fmt.Sprintf("Deleted %d files [%s]. Space opened up after shrinking: [%s]", stats.DeletedCount, BytesSize(stats.DeletedSize), BytesSize(stats.DeletedSize - stats.DeletedShrunkSize))
 }
 
 
@@ -248,24 +249,34 @@ func StartProcessing(proc *ProcessorData, update func()) {
 		fmt.Println(stats0.ShrunkString())
 	}
 
-	if app.ReportOnly {
-		return
+	// Delete files that are done!
+	// Do this before other tasks ..
+	if app.DoClean {
+		for index := range srcFiles {
+			mediaFile := &srcFiles[index]
+			if mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
+				removeMediaFile(mediaFile)
+			}
+		}
 	}
 
-	for index := range srcFiles {
-		mediaFile := &srcFiles[index]
-		if app.DoClean && mediaFile.Stage == AlreadyProcessed {
-			removeMediaFile(mediaFile)
-		}
-		if mediaFile.Stage != Waiting {
-			continue
-		}
-		log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
-		ProcessMediaFile(app, mediaFile, update)
-		if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
-			fmt.Println(fileStats("Shrunk", mediaFile))
-			if app.DoClean {
+	// maybe we should change the flag name?
+	if !app.ReportOnly { // if we want to actually process, start the processing loop!
+		for index := range srcFiles {
+			mediaFile := &srcFiles[index]
+			if app.DoClean && mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
 				removeMediaFile(mediaFile)
+			}
+			if mediaFile.Stage != Waiting {
+				continue
+			}
+			log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
+			ProcessMediaFile(app, mediaFile, update)
+			if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
+				fmt.Println(fileStats("Shrunk", mediaFile))
+				if app.DoClean {
+					removeMediaFile(mediaFile)
+				}
 			}
 		}
 	}
