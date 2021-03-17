@@ -3,6 +3,7 @@ package media_shrinker
 import (
 	"fmt"
 	"log"
+	"time"
 	"os"
 	"path"
 	"strings"
@@ -74,7 +75,7 @@ func BytesSize(size int) string {
 	return fmt.Sprintf("%.2f B", float64(size))
 }
 
-func ProcessMediaFile(app *Processor, mediaFile *MediaFile, update func()) {
+func ProcessMediaFile(app *ProcessorData, mediaFile *MediaFile, ui UI) {
 	if mediaFile.Stage != Waiting {
 		return
 	}
@@ -105,17 +106,19 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile, update func()) {
 
 	switch mediaFile.Type {
 		case Video:
-			result = ShrinkMovie(request, update)
+			result = ShrinkMovie(request, ui)
 		case JPG:
-			result = ShrinkJPG(request, update)
+			result = ShrinkJPG(request)
 		case PNG:
-			result = ShrinkPNG(request, update)
+			result = ShrinkPNG(request)
 		default:
-			log.Println("*** ERROR: unsupported media type:", mediaFile.Type)
+			result = fmt.Errorf("*** ERROR: unsupported media type:", mediaFile.Type)
 	}
 
+	ui.Update()
+
 	if result != nil {
-		log.Println(result)
+		ui.LogError("%+v", result)
 		mediaFile.Stage = ProcessingError
 		mediaFile.Error = result
 		// FIXME: should we clean up or keep the file so the user can inspect it?
@@ -136,7 +139,7 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile, update func()) {
 	var renameError error
 
 	if int(tempFileInfo.Size()) > int(inputFileInfo.Size()) {
-		log.Printf("Converted file (%s) is bigger than input file (%s)! using input file", BytesSize(int(tempFileInfo.Size())), BytesSize(int(inputFileInfo.Size())))
+		ui.LogError("Converted file (%s) is bigger than input file (%s)! using input file", BytesSize(int(tempFileInfo.Size())), BytesSize(int(inputFileInfo.Size())))
 		renameError = copyFile(inputPath, outputPath)
 	} else {
 		renameError = os.Rename(tempPath, outputPath)
@@ -160,19 +163,7 @@ func ProcessMediaFile(app *Processor, mediaFile *MediaFile, update func()) {
 	os.Chtimes(outputPath, inputFileInfo.ModTime(), inputFileInfo.ModTime())
 
 	mediaFile.ShrunkSize = int(outFileInfo.Size())
-}
-
-func (stats *ShrunkStats) accumelate(mediaFile *MediaFile) {
-	if mediaFile.ShrunkSize > 0 && mediaFile.Error == nil {
-		stats.Count += 1
-		stats.SizeBefore += mediaFile.Size
-		stats.SizeAfter += mediaFile.ShrunkSize
-		if mediaFile.Deleted {
-			stats.DeletedCount += 1
-			stats.DeletedSize += mediaFile.Size
-			stats.DeletedShrunkSize += mediaFile.ShrunkSize
-		}
-	}
+	ui.Update()
 }
 
 func (stats *ShrunkStats) ShrunkString() string {
@@ -187,28 +178,37 @@ func (stats *ShrunkStats) CleanedString() string {
 
 func AccumelateStats(files []MediaFile) (stats ShrunkStats) {
 	for index := range files {
-		stats.accumelate(&files[index])
+		mediaFile := &files[index]
+		if mediaFile.ShrunkSize > 0 && mediaFile.Error == nil {
+			stats.Count += 1
+			stats.SizeBefore += mediaFile.Size
+			stats.SizeAfter += mediaFile.ShrunkSize
+			if mediaFile.Deleted {
+				stats.DeletedCount += 1
+				stats.DeletedSize += mediaFile.Size
+				stats.DeletedShrunkSize += mediaFile.ShrunkSize
+			}
+		}
 	}
 	return
 }
 
-func InitProcessorData(opts *ProcessorInitOptions) *ProcessorData {
-	srcFiles, err := ListMediaFiles(app.SrcDir)
+func InitProcessorData(opts Options) *ProcessorData {
+	srcFiles, err := ListMediaFiles(opts.SrcDir)
 	if err != nil {
-		log.Println(err)
-		return
+		log.Fatal(err)
+		return nil
 	}
 
 	// make sure destination and temporary directories exist
-	os.MkdirAll(app.DstDir, 0o755)
-	os.MkdirAll(app.TmpDir, 0o755)
+	os.MkdirAll(opts.DstDir, 0o755)
+	os.MkdirAll(opts.TmpDir, 0o755)
 
 	// Find out which files are already processed
 	{
-		dstFiles, err := ListMediaFiles(app.DstDir)
+		dstFiles, err := ListMediaFiles(opts.DstDir)
 		if err != nil {
 			log.Println(err)
-			return
 		}
 
 		for index := range srcFiles {
@@ -231,13 +231,15 @@ func InitProcessorData(opts *ProcessorInitOptions) *ProcessorData {
 	});
 
 	return &ProcessorData {
-		InitOptions: opts,
-		InputFiles: srcFiles,
+		Options: opts,
+		MediaFiles: srcFiles,
 	}
 }
 
-func StartProcessing(proc *ProcessorData, update func()) {
+func StartProcessing(proc *ProcessorData, ui UI) {
 	// TODO: process pictures first since they are much faster to process
+
+	srcFiles := proc.MediaFiles
 
 	// print current situation
 	for index := range srcFiles {
@@ -251,31 +253,34 @@ func StartProcessing(proc *ProcessorData, update func()) {
 
 	// Delete files that are done!
 	// Do this before other tasks ..
-	if app.DoClean {
+	if proc.Options.DoClean {
 		for index := range srcFiles {
 			mediaFile := &srcFiles[index]
 			if mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
-				removeMediaFile(mediaFile)
+				removeMediaFile(mediaFile, ui)
 			}
 		}
 	}
 
 	// maybe we should change the flag name?
-	if !app.ReportOnly { // if we want to actually process, start the processing loop!
+	if !proc.Options.ReportOnly { // if we want to actually process, start the processing loop!
 		for index := range srcFiles {
+			proc.CurrentIndex = index
 			mediaFile := &srcFiles[index]
-			if app.DoClean && mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
-				removeMediaFile(mediaFile)
+			if proc.Options.DoClean && mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
+				removeMediaFile(mediaFile, ui)
 			}
 			if mediaFile.Stage != Waiting {
 				continue
 			}
-			log.Printf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
-			ProcessMediaFile(app, mediaFile, update)
+			mediaFile.StartTime = time.Now()
+			ui.LogError("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
+			ProcessMediaFile(proc, mediaFile, ui)
+			mediaFile.EndTime = time.Now()
 			if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
-				fmt.Println(fileStats("Shrunk", mediaFile))
-				if app.DoClean {
-					removeMediaFile(mediaFile)
+				ui.LogError(fileStats("Shrunk", mediaFile))
+				if proc.Options.DoClean {
+					removeMediaFile(mediaFile, ui)
 				}
 			}
 		}
@@ -283,27 +288,21 @@ func StartProcessing(proc *ProcessorData, update func()) {
 
 	stats1 := AccumelateStats(srcFiles)
 	if stats1.Count > stats0.Count {
-		fmt.Println(stats1.ShrunkString())
+		ui.LogError(stats1.ShrunkString())
 	}
 	if stats1.DeletedCount > 0 {
-		fmt.Println(stats1.CleanedString())
+		ui.LogError(stats1.CleanedString())
 	}
-
-	fmt.Println("Done")
 }
 
-func DoProcess(opts *ProcessorInitOptions) {
-	proc := InitProcessorData(opts)
-	StartProcessing(proc)
-}
-
-func removeMediaFile(mediaFile *MediaFile) error {
+func removeMediaFile(mediaFile *MediaFile, ui UI) error {
 	inputPath := path.Join(mediaFile.Dir, mediaFile.Name)
 	err := os.Remove(inputPath)
 	if err == nil {
 		log.Println("Deleted file", mediaFile.Name)
 		mediaFile.Deleted = true
 	}
+	ui.Update()
 	return err
 }
 

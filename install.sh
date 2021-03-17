@@ -1,2 +1,2 @@
 # installs to $GOBIN
-go install ./shrinker
+go install ./cmd/shrinker.go
