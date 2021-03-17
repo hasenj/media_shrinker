@@ -28,6 +28,7 @@ func (tui *Tui) Init() {
 	s.SetStyle(defStyle)
 
 	tui.Screen = s
+	tui.Screen.EnableMouse()
 }
 
 func (tui *Tui) Loop() {
@@ -35,13 +36,33 @@ func (tui *Tui) Loop() {
 	for {
 		switch ev := s.PollEvent().(type) {
 		case *tcell.EventResize:
+			tui.Width, tui.Height = ev.Size()
 			s.Sync()
 			tui.Update()
+		case *tcell.EventMouse:
+			// for now only respond to scrolling
+			btns := ev.Buttons()
+			if btns & tcell.WheelUp != 0 {
+				tui.ScrollUp()
+				tui.Update()
+			}
+			if btns & tcell.WheelDown != 0 {
+				tui.ScrollDown()
+				tui.Update()
+			}
 		case *tcell.EventKey:
 			if ev.Key() == tcell.KeyEscape {
 				s.Fini()
 				killChildCommands()
 				os.Exit(0)
+			}
+			if ev.Key() == tcell.KeyUp {
+				tui.ScrollUp()
+				tui.Update()
+			}
+			if ev.Key() == tcell.KeyDown {
+				tui.ScrollDown()
+				tui.Update()
 			}
 		}
 	}
@@ -70,17 +91,18 @@ func (tui *Tui) Update() {
 	tui.Screen.Clear()
 	defer tui.Screen.Show()
 
-	y := 0
+	y := -tui.ScrollPosition
 
 	// FIXME set these up during init
-	waitingStyle := tcell.StyleDefault.Dim(true)
-	errorStyle := tcell.StyleDefault.Foreground(tcell.ColorDarkRed)
-	okStyle := tcell.StyleDefault.Foreground(tcell.ColorForestGreen)
-	activeStyle := tcell.StyleDefault.Foreground(tcell.ColorGreen)
+	textStyle := tcell.StyleDefault.Background(tcell.ColorBlack)
+	waitingStyle := textStyle.Dim(true)
+	errorStyle := textStyle.Foreground(tcell.ColorDarkRed)
+	okStyle := textStyle.Foreground(tcell.ColorForestGreen)
+	activeStyle := textStyle.Foreground(tcell.ColorGreen)
 
 	const x0 = 4
 	for index := range proc.MediaFiles {
-		y += 4
+		y++
 		mediaFile := &proc.MediaFiles[index]
 		switch mediaFile.Stage {
 		case Waiting:
@@ -111,6 +133,23 @@ func (tui *Tui) Update() {
 			}
 			y++
 		}
+	}
+	tui.ScrollHeight = len(proc.MediaFiles) * 5
+}
+
+func (tui *Tui) ScrollUp() {
+	tui.ScrollPosition--
+	// minScrollPosition := tui.Height - tui.ScrollHeight
+	minScrollPosition := 0
+	if tui.ScrollPosition < minScrollPosition {
+		tui.ScrollPosition = minScrollPosition
+	}
+}
+
+func (tui *Tui) ScrollDown() {
+	tui.ScrollPosition++
+	if tui.ScrollPosition > tui.ScrollHeight - 1 {
+		tui.ScrollPosition = tui.ScrollHeight - 1
 	}
 }
 

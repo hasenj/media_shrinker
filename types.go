@@ -22,6 +22,10 @@ type Tui struct {
 	Messages []string
 
 	Width, Height int
+
+	// scrolling
+	ScrollPosition int
+	ScrollHeight int
 }
 
 type MediaType int
