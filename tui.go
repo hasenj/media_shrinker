@@ -38,17 +38,19 @@ func (tui *Tui) Loop() {
 		case *tcell.EventResize:
 			tui.Width, tui.Height = ev.Size()
 			s.Sync()
-			tui.Update()
+			tui.Render()
+		case *UpdateEvent:
+			tui.Render()
 		case *tcell.EventMouse:
 			// for now only respond to scrolling
 			btns := ev.Buttons()
 			if btns & tcell.WheelUp != 0 {
 				tui.ScrollUp()
-				tui.Update()
+				tui.Render()
 			}
 			if btns & tcell.WheelDown != 0 {
 				tui.ScrollDown()
-				tui.Update()
+				tui.Render()
 			}
 		case *tcell.EventKey:
 			if ev.Key() == tcell.KeyEscape {
@@ -58,17 +60,24 @@ func (tui *Tui) Loop() {
 			}
 			if ev.Key() == tcell.KeyUp {
 				tui.ScrollUp()
-				tui.Update()
+				tui.Render()
 			}
 			if ev.Key() == tcell.KeyDown {
 				tui.ScrollDown()
-				tui.Update()
+				tui.Render()
 			}
 		}
 	}
 }
 
+
 func (tui *Tui) Update() {
+	var event UpdateEvent
+	event.SetEventNow()
+	tui.Screen.PostEvent(&event)
+}
+
+func (tui *Tui) Render() {
 	// figure out what is going on right now ...
 	proc := tui.Processor
 
@@ -174,9 +183,3 @@ func emitStr(s tcell.Screen, x, y int, style tcell.Style, format string, a ...in
 	return x
 }
 
-func displayHelloWorld(s tcell.Screen) {
-	s.Clear()
-	emitStr(s, 4, 2, tcell.StyleDefault, "Hello, World! مرحبا 世界（せかい）")
-	emitStr(s, 4, 3, tcell.StyleDefault, "Press ESC to exit.")
-	s.Show()
-}

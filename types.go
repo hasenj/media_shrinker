@@ -12,7 +12,6 @@ type Options struct {
 type ProcessorData struct {
 	Options
 	MediaFiles []MediaFile
-	CurrentIndex int // index of currently processing file from the list
 }
 
 type Tui struct {
@@ -26,6 +25,11 @@ type Tui struct {
 	// scrolling
 	ScrollPosition int
 	ScrollHeight int
+}
+
+
+type UpdateEvent struct {
+	tcell.EventTime
 }
 
 type MediaType int

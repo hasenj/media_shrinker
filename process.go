@@ -238,18 +238,8 @@ func InitProcessorData(opts Options) *ProcessorData {
 
 func StartProcessing(proc *ProcessorData, ui UI) {
 	// TODO: process pictures first since they are much faster to process
-
 	srcFiles := proc.MediaFiles
 
-	// print current situation
-	for index := range srcFiles {
-		mediaFile := &srcFiles[index]
-		fmt.Println(fileStats("File", mediaFile))
-	}
-	stats0 := AccumelateStats(srcFiles)
-	if stats0.Count > 0 {
-		fmt.Println(stats0.ShrunkString())
-	}
 
 	// Delete files that are done!
 	// Do this before other tasks ..
@@ -262,17 +252,30 @@ func StartProcessing(proc *ProcessorData, ui UI) {
 		}
 	}
 
-	// maybe we should change the flag name?
-	if !proc.Options.ReportOnly { // if we want to actually process, start the processing loop!
-		for index := range srcFiles {
-			proc.CurrentIndex = index
-			mediaFile := &srcFiles[index]
-			if proc.Options.DoClean && mediaFile.Stage == AlreadyProcessed && !mediaFile.Deleted {
-				removeMediaFile(mediaFile, ui)
-			}
+	if proc.Options.ReportOnly {
+		return
+	}
+
+	// Start processing
+
+	// split the list of pictures and movies and process each in a separate goroutine
+	var pictures, videos []*MediaFile
+
+	for index := range srcFiles {
+		mediaFile := &srcFiles[index]
+		if mediaFile.Type == Video {
+			videos = append(videos, mediaFile)
+		} else {
+			pictures = append(pictures, mediaFile)
+		}
+	}
+
+	process := func(files []*MediaFile) {
+		for _, mediaFile := range files {
 			if mediaFile.Stage != Waiting {
 				continue
 			}
+
 			mediaFile.StartTime = time.Now()
 			ui.LogError("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
 			ProcessMediaFile(proc, mediaFile, ui)
@@ -285,14 +288,8 @@ func StartProcessing(proc *ProcessorData, ui UI) {
 			}
 		}
 	}
-
-	stats1 := AccumelateStats(srcFiles)
-	if stats1.Count > stats0.Count {
-		ui.LogError(stats1.ShrunkString())
-	}
-	if stats1.DeletedCount > 0 {
-		ui.LogError(stats1.CleanedString())
-	}
+	go process(pictures)
+	go process(videos)
 }
 
 func removeMediaFile(mediaFile *MediaFile, ui UI) error {
