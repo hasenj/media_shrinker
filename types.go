@@ -14,17 +14,35 @@ type ProcessorData struct {
 	MediaFiles []MediaFile
 }
 
+// I would have liked to name this 'Size' but ..
+type RectSize struct {
+	Width, Height int
+}
+
+type Point struct {
+	X, Y int
+}
+
+type Rect struct {
+	Point // origin
+	RectSize
+}
+
+type TuiScrollArea struct {
+	Rect
+	ScrollPosition int
+	ScrollHeight int
+}
+
 type Tui struct {
 	Screen tcell.Screen
 	Processor *ProcessorData
 
 	Messages []string
 
-	Width, Height int
+	Rect
 
-	// scrolling
-	ScrollPosition int
-	ScrollHeight int
+	filesView, messagesView TuiScrollArea
 }
 
 
