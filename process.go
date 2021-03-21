@@ -108,9 +108,9 @@ func ProcessMediaFile(app *ProcessorData, mediaFile *MediaFile, ui UI) {
 		case Video:
 			result = ShrinkMovie(request, ui)
 		case JPG:
-			result = ShrinkJPG(request)
+			result = ShrinkJPG(request, ui)
 		case PNG:
-			result = ShrinkPNG(request)
+			result = ShrinkPNG(request, ui)
 		default:
 			result = fmt.Errorf("*** ERROR: unsupported media type:", mediaFile.Type)
 	}
@@ -277,7 +277,7 @@ func StartProcessing(proc *ProcessorData, ui UI) {
 			}
 
 			mediaFile.StartTime = time.Now()
-			ui.Logf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
+			ui.Logf("Shrinking %s [%s]", mediaFile.Name, BytesSize(mediaFile.Size))
 			ProcessMediaFile(proc, mediaFile, ui)
 			mediaFile.EndTime = time.Now()
 			if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {

@@ -22,6 +22,8 @@ func ResizeImage(img image.Image) image.Image {
 	return resize.Resize(uint(desiredWidth), 0, img, resize.Lanczos3)
 }
 
+type EncoderFn func(out io.Writer, img image.Image) error
+
 func encodePng(out io.Writer, img image.Image) error {
 	encoder := png.Encoder {
 		CompressionLevel: png.BestCompression,
@@ -36,7 +38,7 @@ func encodeJpeg(out io.Writer, img image.Image) error {
 	return jpeg.Encode(out, img, &options)
 }
 
-func ShrinkImage(request ProcessingRequest, encoder func(io.Writer, image.Image) error) error {
+func ShrinkImage(request ProcessingRequest, encoder EncoderFn, ui UI) error {
 	file, err := os.Open(request.InputPath)
 	if err != nil {
 		return fmt.Errorf("Could not open file %s: %w", request.InputPath, err)
@@ -59,10 +61,10 @@ func ShrinkImage(request ProcessingRequest, encoder func(io.Writer, image.Image)
 	return encoder(out, imgResized)
 }
 
-func ShrinkPNG(request ProcessingRequest) error {
-	return ShrinkImage(request, encodePng)
+func ShrinkPNG(request ProcessingRequest, ui UI) error {
+	return ShrinkImage(request, encodePng, ui)
 }
 
-func ShrinkJPG(request ProcessingRequest) error {
-	return ShrinkImage(request, encodeJpeg)
+func ShrinkJPG(request ProcessingRequest, ui UI) error {
+	return ShrinkImage(request, encodeJpeg, ui)
 }

@@ -9,26 +9,38 @@ import "github.com/gdamore/tcell/v2/encoding"
 
 import "github.com/mattn/go-runewidth"
 
-/*
-	TODO:
-	Instead of drawing two rectangles, draw split lines
-*/
-
 // global - meant to be used by immediate drawing function to check mouse situation, etc
 var CurrentEvent tcell.Event
 
+// box drawing
+const LineH = '━'
+const LineV = '┃'
+const TreeR = '┣'
+const TreeL = '┫'
+const TreeT = '┳'
+const TreeB = '┻'
+const Cross = '╋'
+
+// var lg = log.New(os.Stderr, "", 0)
+
 var defStyle = tcell.StyleDefault.Background(tcell.ColorBlack).Foreground(tcell.ColorWhite)
+var rectStyle = defStyle.Dim(true)
+var textStyle = defStyle
+var waitingStyle = textStyle.Dim(true)
+var errorStyle = textStyle.Foreground(tcell.ColorDarkRed)
+var okStyle = textStyle.Foreground(tcell.ColorForestGreen)
+var activeStyle = textStyle.Foreground(tcell.ColorGreen)
 
 func (tui *Tui) Init() {
 	encoding.Register()
 
 	s, e := tcell.NewScreen()
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", e)
+		fmt.Println(e)
 		os.Exit(1)
 	}
 	if e := s.Init(); e != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", e)
+		fmt.Println(e)
 		os.Exit(1)
 	}
 
@@ -98,24 +110,14 @@ func (tui *Tui) Render() {
 	tui.Screen.Clear()
 	defer tui.Screen.Show()
 
-	screenRect := tui.Rect
-	screenRect.Width -= 1 // scrollbar
-	screenRect.Height -= 4 // bug/quirk?
-	tui.filesView.Rect, tui.messagesView.Rect = SplitRectVInterpolate(screenRect, 0.7)
+	screenViewPort := AsViewPort(tui.Screen)
+	filesViewPort, messagesViewPort := screenViewPort.SplitVf(0.7)
 	{
 		view := &tui.filesView
-
 		view.ScrollHeight = len(proc.MediaFiles) * 2
-		screen := DrawScrollArea(view, tui.Screen)
+		viewport := IMScrollArea(view, filesViewPort)
 
 		y := -view.ScrollPosition
-
-		// FIXME set these up during init
-		textStyle := defStyle
-		waitingStyle := textStyle.Dim(true)
-		errorStyle := textStyle.Foreground(tcell.ColorDarkRed)
-		okStyle := textStyle.Foreground(tcell.ColorForestGreen)
-		activeStyle := textStyle.Foreground(tcell.ColorGreen)
 
 		const x0 = 4
 		for index := range proc.MediaFiles {
@@ -123,31 +125,30 @@ func (tui *Tui) Render() {
 			mediaFile := &proc.MediaFiles[index]
 			switch mediaFile.Stage {
 			case Waiting:
-				Print(screen, x0, y, waitingStyle, mediaFile.Name)
+				Print(viewport, x0, y, waitingStyle, mediaFile.Name)
 				y++
 			case ProcessingError:
-				Print(screen, x0, y, errorStyle, mediaFile.Name)
+				Print(viewport, x0, y, errorStyle, mediaFile.Name)
 				y++
 			case ProcessingSuccess, AlreadyProcessed:
 				percentage := float64(mediaFile.ShrunkSize)/float64(mediaFile.Size) * 100
 
-				Print(screen, x0, y, okStyle, mediaFile.Name)
+				Print(viewport, x0, y, okStyle, mediaFile.Name)
 				x := x0 + maxFileNameLength + 5
-				x = Printf(screen, x, y, tcell.StyleDefault, "[%s] -> [%s] (%.2f%%)", BytesSize(mediaFile.Size), BytesSize(mediaFile.ShrunkSize), percentage)
+				x = Printf(viewport, x, y, tcell.StyleDefault, "[%s] -> [%s] (%.2f%%)", BytesSize(mediaFile.Size), BytesSize(mediaFile.ShrunkSize), percentage)
 				if (mediaFile.Deleted) {
-					Print(screen, x + 2, y, errorStyle, "DELETED")
+					Print(viewport, x + 2, y, errorStyle, "DELETED")
 				}
 				y++
 			case ProcessingInProgress:
-				Print(screen, x0, y, activeStyle, mediaFile.Name)
+				Print(viewport, x0, y, activeStyle, mediaFile.Name)
 				if mediaFile.Type == Video {
 					// TODO show a progress bar
 					// fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), percentage, durationProcessed, size.Duration)
 					x := x0 + maxFileNameLength + 5
-					Printf(screen, x, y, tcell.StyleDefault, "%.2f%%", mediaFile.Percentage)
+					Printf(viewport, x, y, tcell.StyleDefault, "%.2f%%", mediaFile.Percentage)
 					timePassed := FormatTime(time.Since(mediaFile.StartTime).Seconds())
-					screenWidth, _ := screen.Size()
-					Print(screen, screenWidth - 1 - len(timePassed), y, tcell.StyleDefault, timePassed)
+					Print(viewport, viewport.Width - 1 - len(timePassed), y, tcell.StyleDefault, timePassed)
 				}
 				y++
 			}
@@ -155,14 +156,18 @@ func (tui *Tui) Render() {
 	}
 	{
 		view := &tui.messagesView
-
-		screen := DrawScrollArea(view, tui.Screen)
 		view.ScrollHeight = len(tui.Messages)
 
-		// This is bad as it tries to print all messages even if we know they are outside the box
+		viewport := IMScrollArea(view, messagesViewPort)
+
 		y := -view.ScrollPosition
 		for _, message := range tui.Messages {
-			Print(screen, 0, y, defStyle, message)
+			if y >= 0 {
+				Print(viewport, 0, y, defStyle, message)
+			}
+			if y >= viewport.Height {
+				break
+			}
 			y++
 		}
 	}
@@ -199,7 +204,14 @@ func Printf(s tcell.Screen, x, y int, style tcell.Style, format string, a ...int
 }
 
 func Print(s tcell.Screen, x, y int, style tcell.Style, message string) int {
+	width, height := s.Size()
+	if !(y >= 0 && y < height) {
+		return x
+	}
 	for _, c := range message {
+		if x > width {
+			break;
+		}
 		var comb []rune
 		w := runewidth.RuneWidth(c)
 		if w == 0 {
@@ -213,54 +225,29 @@ func Print(s tcell.Screen, x, y int, style tcell.Style, message string) int {
 	return x
 }
 
-type ClippedScreen struct {
-	tcell.Screen
-	Rect // clipping rect
-}
-
-func (s *ClippedScreen) SetContent(x int, y int, mainc rune, combc []rune, style tcell.Style) {
-	if x < s.X {
-		return
-	}
-	if x > s.X + s.Width {
-		return
-	}
-	if y < s.Y {
-		return
-	}
-	if y > s.Y + s.Height {
-		return
-	}
-	s.Screen.SetContent(x, y, mainc, combc, style)
-}
-
-func (s *ClippedScreen) Size() (int, int) {
-	return s.Rect.Width, s.Rect.Height
-}
-
-func MakeClippedScreen(screen tcell.Screen, rect Rect) *ClippedScreen {
-	return &ClippedScreen { screen, rect }
-}
-
-type ViewPort struct {
-	tcell.Screen
-	Rect // clipping rect
-}
-
 func (s *ViewPort) SetContent(x int, y int, mainc rune, combc []rune, style tcell.Style) {
 	if x < 0 {
 		return
 	}
-	if x > s.Width {
+	if x >= s.Width {
 		return
 	}
 	if y < 0 {
 		return
 	}
-	if y > s.Height {
+	if y >= s.Height {
 		return
 	}
 	s.Screen.SetContent(x + s.X, y + s.Y, mainc, combc, style)
+}
+
+func (s *ViewPort) GetContent(x int, y int) (rune, []rune, tcell.Style, int) {
+	return s.Screen.GetContent(x + s.X, y + s.Y)
+}
+
+func (s *ViewPort) GetRune(x int, y int) rune {
+	r, _, _, _ := s.GetContent(x, y)
+	return r
 }
 
 func (s *ViewPort) Size() (int, int) {
@@ -271,6 +258,12 @@ func MakeViewPort(screen tcell.Screen, rect Rect) *ViewPort {
 	return &ViewPort { screen, rect }
 }
 
+func AsViewPort(screen tcell.Screen) *ViewPort {
+	var rect Rect
+	rect.Width, rect.Height = screen.Size()
+	return &ViewPort { screen, rect }
+}
+
 // --------
 
 func MousePosition(ev *tcell.EventMouse) Point {
@@ -278,15 +271,15 @@ func MousePosition(ev *tcell.EventMouse) Point {
 	return Point { X: x, Y: y }
 }
 
-func DrawScrollArea(area *TuiScrollArea, screen tcell.Screen) tcell.Screen {
-	textStyle := tcell.StyleDefault.Background(tcell.ColorBlack)
-	rectStyle := textStyle.Dim(true)
-
+// Immediate Mode Scroll Area
+// Draws scrollbar and handles mouse wheel events
+// Returns the viewport within (scrollbar space removed)
+func IMScrollArea(area *TuiScrollArea, vp *ViewPort) *ViewPort {
 	//  mouse wheel scrolling
 	switch ev := CurrentEvent.(type) {
 		case *tcell.EventMouse:
 			// this assumes that area.Rect is the real rect not a translated one ..
-			if RectContains(area.Rect, MousePosition(ev)) {
+			if RectContains(vp.Rect, MousePosition(ev)) {
 				btns := ev.Buttons()
 				if btns & tcell.WheelUp != 0 {
 					area.ScrollUp()
@@ -297,52 +290,85 @@ func DrawScrollArea(area *TuiScrollArea, screen tcell.Screen) tcell.Screen {
 			}
 	}
 
-	// draw corners
-	screen.SetContent(area.X, 			   area.Y,               tcell.RuneULCorner, nil, rectStyle)
-	screen.SetContent(area.X + area.Width, area.Y,               tcell.RuneURCorner, nil, rectStyle)
-	screen.SetContent(area.X,              area.Y + area.Height, tcell.RuneLLCorner, nil, rectStyle)
-	screen.SetContent(area.X + area.Width, area.Y + area.Height, tcell.RuneLRCorner, nil, rectStyle)
-
-	// draw borders
-	for x := area.X + 1; x < area.X + area.Width ; x++ {
-		screen.SetContent(x, area.Y,               tcell.RuneHLine, nil, rectStyle)
-		screen.SetContent(x, area.Y + area.Height, tcell.RuneHLine, nil, rectStyle)
+	// if no need for a scrollbar, don't draw it
+	// and just return the original viewport as the inner one
+	if area.ScrollHeight <= vp.Height {
+		return vp
 	}
-	for y := area.Y + 1; y < area.Y + area.Height; y++ {
-		screen.SetContent(area.X,              y, tcell.RuneVLine, nil, rectStyle)
-		screen.SetContent(area.X + area.Width, y, tcell.RuneVLine, nil, rectStyle)
+
+	const ScrollBarBG = ' ' // or '░' // or '▒'
+	const ScrollBarFG = '▉' // or '▓'
+
+	scrollBarStyle := rectStyle.Background(tcell.ColorGrey)
+
+	// Draw a vertical line
+	x := vp.Width - 1
+	for y := 0; y < vp.Height; y++ {
+		vp.SetContent(x, y, ScrollBarBG, nil, scrollBarStyle)
 	}
 
 	// draw the scroll thumb
-	scrollbarHeight := area.Height - 2
+	scrollbarHeight := vp.Height
 
-	thumbPosition := int((float64(area.ScrollPosition) / float64(area.ScrollHeight)) * float64(scrollbarHeight))
+	if area.ScrollHeight > 0 {
+		thumbY := int((float64(area.ScrollPosition) / float64(area.ScrollHeight)) * float64(scrollbarHeight))
+		vp.SetContent(x, thumbY, ScrollBarFG, nil, scrollBarStyle)
+	}
 
-	screen.SetContent(area.X + area.Width, area.Y + 1 + thumbPosition, tcell.RuneCkBoard, nil, rectStyle)
-
-	innerRect := area.Rect
-	innerRect.X += 1
-	innerRect.Y += 1
-	innerRect.Width -= 2
-	innerRect.Height -= 2
-
-	return MakeViewPort(screen, innerRect)
+	var innerRect Rect = vp.Rect
+	innerRect.Width -= 1
+	return MakeViewPort(vp.Screen, innerRect)
 }
 
-func SplitRectV(rect Rect, at int) (top Rect, bottom Rect) {
-	top = rect
-	bottom = rect
+func (v *ViewPort) SplitV(at int) (top *ViewPort, bottom *ViewPort) {
+	rect := v.Rect
+	topR := rect
+	bottomR := rect
 
-	top.Height = at - 1
+	topR.Height = at
 
-	bottom.Y = at + 1
-	bottom.Height -= (at - 1)
+	bottomR.Y = at + 1
+	bottomR.Height = rect.Height - at - 1
 
-	return top, bottom
+	top = MakeViewPort(v, topR)
+	bottom = MakeViewPort(v, bottomR)
+
+
+	// Draw the horizontal line
+	// First we need to decide for each edge whether to draw just the line or its intersection with another line
+	{
+		exLeft  := v.GetRune(0,           at)
+		exRight := v.GetRune(v.Width - 1, at)
+
+		var rLeft  rune = LineH
+		var rRight rune = LineH
+
+		switch exLeft {
+		case LineV:
+			rLeft = TreeR
+		case TreeL:
+			rLeft = Cross
+		}
+		switch exRight {
+		case LineV:
+			rRight = TreeL
+		case TreeR:
+			rRight = Cross
+		}
+
+		v.SetContent(0,       at, rLeft,  nil, rectStyle)
+		v.SetContent(v.Width - 1, at, rRight, nil, rectStyle)
+
+		for i := 1; i < v.Width - 1; i++ {
+			v.SetContent(i, at, LineH, nil, rectStyle)
+		}
+	}
+
+	return
 }
 
-func SplitRectVInterpolate(rect Rect, at float64) (top Rect, bottom Rect) {
-	return SplitRectV(rect, int(float64(rect.Height) * at))
+func (v *ViewPort) SplitVf(at float64) (top *ViewPort, bottom *ViewPort) {
+	return v.SplitV(int(float64(v.Rect.Height) * at))
 }
 
 func SplitRectH(rect Rect, at int) (left Rect, right Rect) {

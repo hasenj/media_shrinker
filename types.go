@@ -28,8 +28,12 @@ type Rect struct {
 	RectSize
 }
 
+type ViewPort struct {
+	tcell.Screen // this should be *the* screen and not some other ViewPort otherwise it will not work
+	Rect // clipping rect
+}
+
 type TuiScrollArea struct {
-	Rect
 	ScrollPosition int
 	ScrollHeight int
 }
