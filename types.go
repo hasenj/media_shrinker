@@ -71,7 +71,8 @@ const (
 )
 
 type UI interface {
-	LogError(format string, a ...interface{})
+	Logf(format string, a ...interface{})
+	Log(message string)
 	Update()
 }
 

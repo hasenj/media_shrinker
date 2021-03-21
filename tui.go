@@ -9,6 +9,11 @@ import "github.com/gdamore/tcell/v2/encoding"
 
 import "github.com/mattn/go-runewidth"
 
+/*
+	TODO:
+	Instead of drawing two rectangles, draw split lines
+*/
+
 // global - meant to be used by immediate drawing function to check mouse situation, etc
 var CurrentEvent tcell.Event
 
@@ -104,13 +109,15 @@ func (tui *Tui) Render() {
 
 	screenRect := tui.Rect
 	screenRect.Width -= 1 // scrollbar
-	filesRect, _ := SplitRectVInterpolate(screenRect, 0.7)
+	screenRect.Height -= 4 // bug/quirk?
+	tui.filesView.Rect, tui.messagesView.Rect = SplitRectVInterpolate(screenRect, 0.7)
 	{
-		tui.filesView.Rect = filesRect
-		screen := DrawScrollArea(&tui.filesView, tui.Screen)
+		view := &tui.filesView
 
+		view.ScrollHeight = len(proc.MediaFiles) * 2
+		screen := DrawScrollArea(view, tui.Screen)
 
-		y := -tui.filesView.ScrollPosition
+		y := -view.ScrollPosition
 
 		// FIXME set these up during init
 		textStyle := defStyle
@@ -125,36 +132,48 @@ func (tui *Tui) Render() {
 			mediaFile := &proc.MediaFiles[index]
 			switch mediaFile.Stage {
 			case Waiting:
-				emitStr(screen, x0, y, waitingStyle, mediaFile.Name)
+				Print(screen, x0, y, waitingStyle, mediaFile.Name)
 				y++
 			case ProcessingError:
-				emitStr(screen, x0, y, errorStyle, mediaFile.Name)
+				Print(screen, x0, y, errorStyle, mediaFile.Name)
 				y++
 			case ProcessingSuccess, AlreadyProcessed:
 				percentage := float64(mediaFile.ShrunkSize)/float64(mediaFile.Size) * 100
 
-				emitStr(screen, x0, y, okStyle, mediaFile.Name)
+				Print(screen, x0, y, okStyle, mediaFile.Name)
 				x := x0 + maxFileNameLength + 5
-				x = emitStr(screen, x, y, tcell.StyleDefault, "[%s] -> [%s] (%.2f%%)", BytesSize(mediaFile.Size), BytesSize(mediaFile.ShrunkSize), percentage)
+				x = Printf(screen, x, y, tcell.StyleDefault, "[%s] -> [%s] (%.2f%%)", BytesSize(mediaFile.Size), BytesSize(mediaFile.ShrunkSize), percentage)
 				if (mediaFile.Deleted) {
-					emitStr(screen, x + 2, y, errorStyle, "DELETED")
+					Print(screen, x + 2, y, errorStyle, "DELETED")
 				}
 				y++
 			case ProcessingInProgress:
-				emitStr(screen, x0, y, activeStyle, mediaFile.Name)
+				Print(screen, x0, y, activeStyle, mediaFile.Name)
 				if mediaFile.Type == Video {
 					// TODO show a progress bar
 					// fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), percentage, durationProcessed, size.Duration)
 					x := x0 + maxFileNameLength + 5
-					emitStr(screen, x, y, tcell.StyleDefault, "%.2f%%", mediaFile.Percentage)
+					Printf(screen, x, y, tcell.StyleDefault, "%.2f%%", mediaFile.Percentage)
 					timePassed := FormatTime(time.Since(mediaFile.StartTime).Seconds())
 					screenWidth, _ := screen.Size()
-					emitStr(screen, screenWidth - 1 - len(timePassed), y, tcell.StyleDefault, timePassed)
+					Print(screen, screenWidth - 1 - len(timePassed), y, tcell.StyleDefault, timePassed)
 				}
 				y++
 			}
 		}
-		tui.filesView.ScrollHeight = len(proc.MediaFiles) * 2
+	}
+	{
+		view := &tui.messagesView
+
+		screen := DrawScrollArea(view, tui.Screen)
+		view.ScrollHeight = len(tui.Messages)
+
+		// This is bad as it tries to print all messages even if we know they are outside the box
+		y := -view.ScrollPosition
+		for _, message := range tui.Messages {
+			Print(screen, 0, y, defStyle, message)
+			y++
+		}
 	}
 }
 
@@ -174,13 +193,21 @@ func (area *TuiScrollArea) ScrollDown() {
 	}
 }
 
-func (tui *Tui) LogError(format string, a ...interface{}) {
+func (tui *Tui) Logf(format string, a ...interface{}) {
 	message := fmt.Sprintf(format, a...)
 	tui.Messages = append(tui.Messages, message)
 }
 
-func emitStr(s tcell.Screen, x, y int, style tcell.Style, format string, a ...interface{}) int {
+func (tui *Tui) Log(message string) {
+	tui.Messages = append(tui.Messages, message)
+}
+
+func Printf(s tcell.Screen, x, y int, style tcell.Style, format string, a ...interface{}) int {
 	message := fmt.Sprintf(format, a...)
+	return Print(s, x, y, style, message)
+}
+
+func Print(s tcell.Screen, x, y int, style tcell.Style, message string) int {
 	for _, c := range message {
 		var comb []rune
 		w := runewidth.RuneWidth(c)

@@ -118,7 +118,7 @@ func ProcessMediaFile(app *ProcessorData, mediaFile *MediaFile, ui UI) {
 	ui.Update()
 
 	if result != nil {
-		ui.LogError("%+v", result)
+		ui.Logf("%+v", result)
 		mediaFile.Stage = ProcessingError
 		mediaFile.Error = result
 		// FIXME: should we clean up or keep the file so the user can inspect it?
@@ -139,7 +139,7 @@ func ProcessMediaFile(app *ProcessorData, mediaFile *MediaFile, ui UI) {
 	var renameError error
 
 	if int(tempFileInfo.Size()) > int(inputFileInfo.Size()) {
-		ui.LogError("Converted file (%s) is bigger than input file (%s)! using input file", BytesSize(int(tempFileInfo.Size())), BytesSize(int(inputFileInfo.Size())))
+		ui.Logf("Converted file (%s) is bigger than input file (%s)! using input file", BytesSize(int(tempFileInfo.Size())), BytesSize(int(inputFileInfo.Size())))
 		renameError = copyFile(inputPath, outputPath)
 	} else {
 		renameError = os.Rename(tempPath, outputPath)
@@ -277,11 +277,11 @@ func StartProcessing(proc *ProcessorData, ui UI) {
 			}
 
 			mediaFile.StartTime = time.Now()
-			ui.LogError("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
+			ui.Logf("Shrinking %s [%s]\n", mediaFile.Name, BytesSize(mediaFile.Size))
 			ProcessMediaFile(proc, mediaFile, ui)
 			mediaFile.EndTime = time.Now()
 			if mediaFile.Error == nil && mediaFile.Stage == ProcessingSuccess {
-				ui.LogError(fileStats("Shrunk", mediaFile))
+				ui.Log(fileStats("Shrunk", mediaFile))
 				if proc.Options.DoClean {
 					removeMediaFile(mediaFile, ui)
 				}

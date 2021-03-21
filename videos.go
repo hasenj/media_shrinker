@@ -97,7 +97,7 @@ func ShrinkMovie(request ProcessingRequest, ui UI) (result error) {
 	}
 
 	// startTime := time.Now()
-	ui.LogError(cmd.String())
+	ui.Log(cmd.String())
 	cmd.Start()
 
 	// Read the text output of ffmpeg and parse it to understand progress and present it to the user
@@ -111,7 +111,7 @@ func ShrinkMovie(request ProcessingRequest, ui UI) (result error) {
 				// This is an IO error. It doesn't necessarily mean processing failed.
 				// Just break out of the I/O parsing loop and
 				// wait for the FFMPEG process to finish
-				ui.LogError("I/O error while interacting with ffmpeg %w", err)
+				ui.Logf("I/O error while interacting with ffmpeg %w", err)
 
 				// FIXME end the process now and return the error!!
 			}
@@ -120,14 +120,14 @@ func ShrinkMovie(request ProcessingRequest, ui UI) (result error) {
 
 		timestampIndex := strings.LastIndex(line, "time=")
 		if timestampIndex == -1 {
-			ui.LogError("warning: no timestamp found!!\r")
+			ui.Log("warning: no timestamp found!!")
 			continue // should not happen?!
 		}
 		timestampIndex += len("time=")
 		ts := line[timestampIndex:]
 		spaceIndex := strings.Index(ts, " ")
 		if spaceIndex == -1 {
-			ui.LogError("could not parse timestamp:", ts)
+			ui.Logf("could not parse timestamp: %v", ts)
 			continue
 		}
 		ts = ts[:spaceIndex]
