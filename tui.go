@@ -24,7 +24,7 @@ const Cross = '╋'
 // var lg = log.New(os.Stderr, "", 0)
 
 var defStyle = tcell.StyleDefault.Background(tcell.ColorBlack).Foreground(tcell.ColorWhite)
-var rectStyle = defStyle.Dim(true)
+var rectStyle = defStyle.Bold(true) //.Background(tcell.ColorGrey) //.Dim(true)
 var textStyle = defStyle
 var waitingStyle = textStyle.Dim(true)
 var errorStyle = textStyle.Foreground(tcell.ColorDarkRed)
@@ -111,7 +111,8 @@ func (tui *Tui) Render() {
 	defer tui.Screen.Show()
 
 	screenViewPort := AsViewPort(tui.Screen)
-	filesViewPort, messagesViewPort := screenViewPort.SplitVf(0.7)
+	filesViewPort, bottomViewPort := screenViewPort.SplitV(-10)
+	messagesViewPort, _ := bottomViewPort.SplitH(-30)
 	{
 		view := &tui.filesView
 		view.ScrollHeight = len(proc.MediaFiles) * 2
@@ -297,7 +298,7 @@ func IMScrollArea(area *TuiScrollArea, vp *ViewPort) *ViewPort {
 	}
 
 	const ScrollBarBG = ' ' // or '░' // or '▒'
-	const ScrollBarFG = '▉' // or '▓'
+	const ScrollBarFG = '█' // or '▓'
 
 	scrollBarStyle := rectStyle.Background(tcell.ColorGrey)
 
@@ -321,6 +322,10 @@ func IMScrollArea(area *TuiScrollArea, vp *ViewPort) *ViewPort {
 }
 
 func (v *ViewPort) SplitV(at int) (top *ViewPort, bottom *ViewPort) {
+	if at < 0 {
+		at = v.Height + at
+	}
+
 	rect := v.Rect
 	topR := rect
 	bottomR := rect
@@ -330,8 +335,8 @@ func (v *ViewPort) SplitV(at int) (top *ViewPort, bottom *ViewPort) {
 	bottomR.Y = at + 1
 	bottomR.Height = rect.Height - at - 1
 
-	top = MakeViewPort(v, topR)
-	bottom = MakeViewPort(v, bottomR)
+	top = MakeViewPort(v.Screen, topR)
+	bottom = MakeViewPort(v.Screen, bottomR)
 
 
 	// Draw the horizontal line
@@ -371,12 +376,55 @@ func (v *ViewPort) SplitVf(at float64) (top *ViewPort, bottom *ViewPort) {
 	return v.SplitV(int(float64(v.Rect.Height) * at))
 }
 
-func SplitRectH(rect Rect, at int) (left Rect, right Rect) {
-	left = rect
-	right = rect
-	left.Width = at - 1
-	left.X = at + 1
-	left.Width -= (at - 1)
+func (v *ViewPort) SplitHf(at float64) (top *ViewPort, bottom *ViewPort) {
+	return v.SplitH(int(float64(v.Rect.Width) * at))
+}
+
+func (v *ViewPort) SplitH(at int) (left *ViewPort, right *ViewPort) {
+	if at < 0 {
+		at = v.Width + at
+	}
+	rect := v.Rect
+	leftR := rect
+	rightR := rect
+
+	leftR.Width = at
+
+	rightR.X = at + 1
+	rightR.Width = rect.Width - at - 1
+
+	// Draw the vertical line
+	// First we need to decide for each edge whether to draw just the line or its intersection with another line
+	{
+		exTop    := v.GetRune(at, 0)
+		exBottom := v.GetRune(at, v.Height - 1)
+
+		var rTop    rune = LineV
+		var rBottom rune = LineV
+
+		switch exTop {
+		case LineH:
+			rTop = TreeB
+		case TreeT:
+			rTop = Cross
+		}
+		switch exBottom {
+		case LineH:
+			rBottom = TreeB
+		case TreeT:
+			rBottom = Cross
+		}
+
+		v.SetContent(at, 0,            rTop,    nil, rectStyle)
+		v.SetContent(at, v.Height - 1, rBottom, nil, rectStyle)
+
+		for i := 1; i < v.Height - 1; i++ {
+			v.SetContent(at, i, LineV, nil, rectStyle)
+		}
+	}
+
+	left = MakeViewPort(v.Screen, leftR)
+	right = MakeViewPort(v.Screen, rightR)
 
 	return left, right
 }
