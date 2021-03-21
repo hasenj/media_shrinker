@@ -50,16 +50,7 @@ func (tui *Tui) Loop() {
 		case *UpdateEvent:
 			tui.Render()
 		case *tcell.EventMouse:
-			// for now only respond to scrolling
-			btns := ev.Buttons()
-			if btns & tcell.WheelUp != 0 {
-				tui.filesView.ScrollUp()
-				tui.Render()
-			}
-			if btns & tcell.WheelDown != 0 {
-				tui.filesView.ScrollDown()
-				tui.Render()
-			}
+			tui.Render()
 		case *tcell.EventKey:
 			if ev.Key() == tcell.KeyEscape {
 				s.Fini()
@@ -282,23 +273,29 @@ func MakeViewPort(screen tcell.Screen, rect Rect) *ViewPort {
 
 // --------
 
+func MousePosition(ev *tcell.EventMouse) Point {
+	x, y := ev.Position()
+	return Point { X: x, Y: y }
+}
+
 func DrawScrollArea(area *TuiScrollArea, screen tcell.Screen) tcell.Screen {
 	textStyle := tcell.StyleDefault.Background(tcell.ColorBlack)
 	rectStyle := textStyle.Dim(true)
 
-	// TODO: add mouse wheel event handling and check if the mouse is within the area
-	/*
+	//  mouse wheel scrolling
+	switch ev := CurrentEvent.(type) {
 		case *tcell.EventMouse:
-			btns := ev.Buttons()
-			if btns & tcell.WheelUp != 0 {
-				tui.ScrollUp()
-				tui.Render()
+			// this assumes that area.Rect is the real rect not a translated one ..
+			if RectContains(area.Rect, MousePosition(ev)) {
+				btns := ev.Buttons()
+				if btns & tcell.WheelUp != 0 {
+					area.ScrollUp()
+				}
+				if btns & tcell.WheelDown != 0 {
+					area.ScrollDown()
+				}
 			}
-			if btns & tcell.WheelDown != 0 {
-				tui.ScrollDown()
-				tui.Render()
-			}
-	*/
+	}
 
 	// draw corners
 	screen.SetContent(area.X, 			   area.Y,               tcell.RuneULCorner, nil, rectStyle)
@@ -356,4 +353,9 @@ func SplitRectH(rect Rect, at int) (left Rect, right Rect) {
 	left.Width -= (at - 1)
 
 	return left, right
+}
+
+func RectContains(rect Rect, point Point) bool {
+	return point.X >= rect.X && point.X < rect.X + rect.Width &&
+		point.Y >= rect.Y && point.Y < rect.Y + rect.Height
 }
