@@ -1,1 +1,1 @@
-go build -o bin ./shrinker
+go build -o bin ./cmd/shrinker.go

@@ -4,11 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os/exec"
 	"strings"
-	"time"
+	// "time"
 )
 
 // ParseTime_FF parses the timestamp strings printed by ffmpeg during processing
@@ -67,7 +66,7 @@ func ProbeVideoSize(inpath string) (out VideoSize, err error) {
 }
 
 // returns nil if success
-func ShrinkMovie(request ProcessingRequest) (result error) {
+func ShrinkMovie(request ProcessingRequest, ui UI) (result error) {
 	size, err := ProbeVideoSize(request.InputPath)
 	if err != nil {
 		return fmt.Errorf("Probing video size failed: %w", err)
@@ -90,14 +89,15 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 	args = append(args, "-c:v", "libx264", "-crf", "26")
 	args = append(args, request.OutputPath)
 	cmd := exec.Command("ffmpeg", args...)
+	registerCommand(cmd)
 
 	cmdout, err := cmd.StderrPipe()
 	if err != nil {
 		panic(fmt.Errorf("programmer error: incorrect usage of command piping: %w", err))
 	}
 
-	startTime := time.Now()
-	fmt.Println(cmd.String())
+	// startTime := time.Now()
+	ui.Log(cmd.String())
 	cmd.Start()
 
 	// Read the text output of ffmpeg and parse it to understand progress and present it to the user
@@ -111,30 +111,35 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 				// This is an IO error. It doesn't necessarily mean processing failed.
 				// Just break out of the I/O parsing loop and
 				// wait for the FFMPEG process to finish
-				log.Printf("I/O error while interacting with ffmpeg %w", err)
+				ui.Logf("I/O error while interacting with ffmpeg %w", err)
+
+				// FIXME end the process now and return the error!!
 			}
 			break
 		}
 
 		timestampIndex := strings.LastIndex(line, "time=")
 		if timestampIndex == -1 {
-			fmt.Printf("warning: no timestamp found!!\r")
+			ui.Log("warning: no timestamp found!!")
 			continue // should not happen?!
 		}
 		timestampIndex += len("time=")
 		ts := line[timestampIndex:]
 		spaceIndex := strings.Index(ts, " ")
 		if spaceIndex == -1 {
-			fmt.Println("could not parse timestamp:", ts)
+			ui.Logf("could not parse timestamp: %v", ts)
 			continue
 		}
 		ts = ts[:spaceIndex]
 		durationProcessed := ParseTime_FF(ts) // of the video
-		progress := (float64(durationProcessed) / size.Duration) * 100
-		timePassed := time.Since(startTime) // monotonic clock time
+		percentage := (float64(durationProcessed) / size.Duration) * 100
+		// timePassed := time.Since(startTime) // monotonic clock time
+		request.Target.Percentage = percentage
+		request.Target.Processed = durationProcessed
+		ui.Update()
 
 		// FIXME use a "print status line" function instead?
-		fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), progress, durationProcessed, size.Duration)
+		// fmt.Printf("%s -> %.2f%% [%.2f / %.2f]        \r", FormatTime(timePassed.Seconds()), percentage, durationProcessed, size.Duration)
 	}
 
 	// Wait for ffmpeg process to finish
@@ -160,4 +165,16 @@ func ShrinkMovie(request ProcessingRequest) (result error) {
 
 	// success!!
 	return nil
+}
+
+var runningCommands []*exec.Cmd
+func registerCommand(cmd *exec.Cmd) {
+	runningCommands = append(runningCommands, cmd)
+}
+
+func killChildCommands() {
+	for _, cmd := range runningCommands {
+		// can fail silently if already killed - we don't care
+		cmd.Process.Kill()
+	}
 }

@@ -1,8 +1,57 @@
 package media_shrinker
 
-type Processor struct {
+import "time"
+
+import "github.com/gdamore/tcell/v2"
+
+type Options struct {
 	SrcDir, DstDir, TmpDir string
 	DoClean, ReportOnly    bool
+}
+
+type ProcessorData struct {
+	Options
+	MediaFiles []MediaFile
+}
+
+// I would have liked to name this 'Size' but ..
+type RectSize struct {
+	Width, Height int
+}
+
+type Point struct {
+	X, Y int
+}
+
+type Rect struct {
+	Point // origin
+	RectSize
+}
+
+type ViewPort struct {
+	tcell.Screen // this should be *the* screen and not some other ViewPort otherwise it will not work
+	Rect // clipping rect
+}
+
+type TuiScrollArea struct {
+	ScrollPosition int
+	ScrollHeight int
+}
+
+type Tui struct {
+	Screen tcell.Screen
+	Processor *ProcessorData
+
+	Messages []string
+
+	Rect
+
+	filesView, messagesView TuiScrollArea
+}
+
+
+type UpdateEvent struct {
+	tcell.EventTime
 }
 
 type MediaType int
@@ -19,10 +68,17 @@ type ProcessingStage int
 const (
 	Waiting ProcessingStage = iota
 	ProcessingInProgress
-	ProcessingError
-	ProcessingSuccess
-	AlreadyProcessed
+
+	ProcessingError	  // attempted to process but failed
+	ProcessingSuccess // processed this time and succeeded
+	AlreadyProcessed  // processed from previous runs
 )
+
+type UI interface {
+	Logf(format string, a ...interface{})
+	Log(message string)
+	Update()
+}
 
 type MediaFile struct {
 	Type      MediaType
@@ -33,12 +89,24 @@ type MediaFile struct {
 	ShrunkSize int
 	Error      error // if processing failed, or if processing worked but some other error occurred
 
+	// When in progress, how far along are we!
+	Percentage float64
+
+	// For videos, duration processed (in seconds)
+	Processed float64
+
 	Deleted bool
+
+	StartTime, EndTime time.Time
 }
 
 type ProcessingRequest struct {
+	Target *MediaFile
+
 	InputPath  string
 	OutputPath string
+
+	UI UI
 }
 
 type ShrunkStats struct {
