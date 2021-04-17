@@ -1,0 +1,15 @@
+Utility to shrink file size of videos and images taken with smartphones.
+
+Still experimental and mostly for personaly use - not meant to be used by the masses.
+
+Feel free to try it out and use it on your risk - if you want.
+
+Videos are shrunk using ffmpeg (external dependency) - by resizing and reencoding.
+
+Images are shrunk by just resizing.
+
+Output media files are roughly 30% the original size without a human visible loss of quality.
+
+The utility is "idempotent" - you can run it on a directory, stop half way through, and run it again later. Files that are already shrunk will not be shrunk again.
+
+Original files are left untouched (unless the -clean flag is provided).
